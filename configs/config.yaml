@@ -1,0 +1,19 @@
+# Single source of truth for paths, seeds, split dates and thresholds (§13.6).
+
+paths:
+  raw: data/raw
+  processed: data/processed
+
+random_state: 42
+timezone: Asia/Hong_Kong
+
+# Stage 3: data preparation
+resample_freq: 15min
+min_daylight_coverage: 0.70
+
+# Stage 11: chronological split
+split:
+  train_end: "2022-06-30"
+  val_end: "2022-12-31"
+  test_start: "2023-01-01"
+  test_end: "2023-12-31"
