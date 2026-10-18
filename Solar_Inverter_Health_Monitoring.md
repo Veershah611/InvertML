@@ -69,17 +69,17 @@ Every stage is either implemented or explicitly marked "not applicable" with a r
 
 | Column | Type | Unit | Available? |
 |---|---|---|---|
-| `Time` | datetime | HKT (assumed; README does not state it) | ✓ all files |
-| Station / inverter ID | categorical | — | ✓ from the file name |
-| `totalActivePower` (AC power) | float | **W** | ✓ inverter files |
-| Per-phase L1/L2/L3: AC current, AC voltage, AC frequency, active power, reactive power | float | A, V, Hz, W | ✓ inverter files |
-| `dcVoltage` | float | V | ✓ inverter files |
-| DC current / DC power | — | — | ✗ not provided |
-| `generation` (energy), `power` | float | kWh, W | ✓ site-level files only |
-| Irradiance (single sensor; GHI vs. plane-of-array not stated) | float | W/m² | ✓ 1-min |
-| Ambient temperature | float | °C | ✓ 1-min |
-| Module temperature | — | — | ✗ not provided |
-| Wind speed / direction, relative humidity, rainfall, sea-level pressure, visibility | float | m/s, °, %, mm, hPa, km | ✓ 1-min |
+| `Time` | datetime | HKT (assumed; README does not state it) | Yes, all files |
+| Station / inverter ID | categorical | — | Yes, from the file name |
+| `totalActivePower` (AC power) | float | **W** | Yes, inverter files |
+| Per-phase L1/L2/L3: AC current, AC voltage, AC frequency, active power, reactive power | float | A, V, Hz, W | Yes, inverter files |
+| `dcVoltage` | float | V | Yes, inverter files |
+| DC current / DC power | — | — | No, not provided |
+| `generation` (energy), `power` | float | kWh, W | Yes, site-level files only |
+| Irradiance (single sensor; GHI vs. plane-of-array not stated) | float | W/m² | Yes, 1-min |
+| Ambient temperature | float | °C | Yes, 1-min |
+| Module temperature | — | — | No, not provided |
+| Wind speed / direction, relative humidity, rainfall, sea-level pressure, visibility | float | m/s, °, %, mm, hPa, km | Yes, 1-min |
 
 The feature design (§7) works with **AC power + irradiance + ambient temperature + capacity** alone. Both *conditional* features (AC/DC conversion efficiency and module − ambient temperature) are **not possible** with this dataset.
 
@@ -192,7 +192,7 @@ Include univariate, bivariate and target-distribution analysis. Leave out purely
 * Temperature delta = module − ambient temperature; thermal-stress proxy = temperature delta per unit irradiance.
 
 ### 7.2 Target construction (and avoiding circular leakage)
-⚠️ If the health score is computed from features at time *t* and the model predicts it from those same features at time *t*, the model only learns the formula back. Evaluators will treat that as target leakage.
+**Warning:** If the health score is computed from features at time *t* and the model predicts it from those same features at time *t*, the model only learns the formula back. Evaluators will treat that as target leakage.
 
 Use **one** of the following designs and justify it in the report:
 

@@ -5,8 +5,12 @@ Step 1: parse the Brick metadata (.ttl) into one row per inverter
 Step 2: convert the raw CSVs to typed float32 Parquet (no resampling yet)
         -> data/processed/inverter_5min.parquet
         -> data/processed/weather_1min.parquet
-Step 3: resample both to 15-min and merge with the metadata
+Step 3: resample both to 15-min
+Step 4: rebuild the full 15-min grid per inverter, merge weather + metadata,
+        gap analysis, daylight-coverage filter, before/after summary
         -> data/processed/hkust_15min_v1.parquet
+        -> reports/tables/{gaps_by_inverter_month, coverage_by_inverter,
+                           prep_summary}.csv
 
 Timestamps are kept as naive Hong Kong local time (HKT, UTC+8). Hong Kong has
 no daylight saving, so there are no repeated or skipped hours.
@@ -50,6 +54,15 @@ WEATHER_YEARS = [2021, 2022, 2023]
 
 FREQ = CONFIG["resample_freq"]
 MERGED_NAME = "hkust_15min_v1.parquet"
+TABLES = ROOT / "reports" / "tables"
+
+# The inverter loggers only record 06:00-17:59, so the 15-min grid runs from
+# the 06:00 bin to the 17:45 bin. Generation after 18:00 is never recorded.
+LOGGER_FIRST_BIN = "06:00"
+LOGGER_LAST_BIN = "17:45"
+DATA_END = pd.Timestamp(CONFIG["split"]["test_end"]) + pd.Timedelta(LOGGER_LAST_BIN + ":00")
+DAYLIGHT_WM2 = CONFIG["daylight_irradiance_wm2"]
+MIN_COVERAGE = CONFIG["min_daylight_coverage"]
 
 # The raw .ttl has one syntax error: the Zone_D block ends a statement with
 # "." instead of ";" after ratedPowerOutput, so rdflib refuses to parse it.
@@ -303,8 +316,54 @@ def merge_all(inv15, weather15, meta):
     return merged
 
 
+def build_full_grid(inv15, freq=FREQ):
+    """Reindex each inverter to every 06:00-17:45 bin from its first bin to
+    the end of 2023. Added rows are NaN with n_valid_5min = 0."""
+    grids = []
+    for inverter_id, first in inv15.groupby("inverter_id", observed=True)["time"].min().items():
+        times = pd.date_range(first, DATA_END, freq=freq)
+        times = times[(times.strftime("%H:%M") >= LOGGER_FIRST_BIN)
+                      & (times.strftime("%H:%M") <= LOGGER_LAST_BIN)]
+        grids.append(pd.DataFrame({"inverter_id": inverter_id, "time": times}))
+    grid = pd.concat(grids, ignore_index=True)
+
+    inv15 = inv15.copy()
+    inv15["inverter_id"] = inv15["inverter_id"].astype(str)
+    full = grid.merge(inv15, on=["inverter_id", "time"], how="left", validate="one_to_one")
+    full["n_valid_5min"] = full["n_valid_5min"].fillna(0).astype("int8")
+    return full
+
+
+def gap_tables(df):
+    """Missing = no valid power reading in the bin. Only daylight bins
+    (irradiance >= DAYLIGHT_WM2) count; bins without weather are excluded."""
+    daylight = df["irradiance_wm2"] >= DAYLIGHT_WM2
+    d = pd.DataFrame({
+        "inverter_id": df["inverter_id"].astype(str),
+        "month": df["time"].dt.to_period("M").astype(str),
+        "missing": df["n_valid_5min"] == 0,
+    })[daylight]
+
+    by_month = d.groupby(["inverter_id", "month"]).agg(
+        daylight_bins=("missing", "size"), missing_bins=("missing", "sum"))
+    by_month["missing_pct"] = (100 * by_month["missing_bins"] / by_month["daylight_bins"]).round(2)
+
+    coverage = d.groupby("inverter_id").agg(
+        daylight_bins=("missing", "size"), missing_bins=("missing", "sum"))
+    coverage["first_time"] = df.groupby(df["inverter_id"].astype(str))["time"].min()
+    coverage["coverage"] = (1 - coverage["missing_bins"] / coverage["daylight_bins"]).round(4)
+    coverage["kept"] = coverage["coverage"] >= MIN_COVERAGE
+    return by_month.reset_index(), coverage.sort_values("coverage").reset_index()
+
+
+def summary_row(step, df):
+    return {"step": step, "rows": len(df), "columns": df.shape[1],
+            "inverters": df["inverter_id"].nunique()}
+
+
 def main():
     PROCESSED.mkdir(parents=True, exist_ok=True)
+    TABLES.mkdir(parents=True, exist_ok=True)
 
     print("Step 1: Brick metadata")
     graph = load_brick_graph()
@@ -332,15 +391,45 @@ def main():
     weather.to_parquet(out, index=False)
     print(f"Saved {out.relative_to(ROOT)}: {len(weather):,} rows x {weather.shape[1]} columns")
 
-    print(f"Step 3: resample to {FREQ} and merge")
+    summary = [summary_row("raw 5-min inverter data", inv)]
+
+    print(f"Step 3: resample to {FREQ}")
     inv15 = resample_inverters(inv)
+    summary.append(summary_row(f"resampled to {FREQ}", inv15))
     print(f"  inverters: {len(inv):,} -> {len(inv15):,} rows")
     weather15 = resample_weather(weather)
     print(f"  weather:   {len(weather):,} -> {len(weather15):,} rows")
-    merged = merge_all(inv15, weather15, meta)
+
+    print("Step 4: full grid, merge, gap analysis, coverage filter")
+    full = build_full_grid(inv15)
+    summary.append(summary_row(f"full {LOGGER_FIRST_BIN}-{LOGGER_LAST_BIN} grid", full))
+    print(f"  full grid: {len(inv15):,} -> {len(full):,} rows "
+          f"({len(full) - len(inv15):,} empty bins added)")
+    merged = merge_all(full, weather15, meta)
+    summary.append(summary_row("merged with weather + metadata", merged))
+
+    by_month, coverage = gap_tables(merged)
+    by_month.to_csv(TABLES / "gaps_by_inverter_month.csv", index=False)
+    coverage.to_csv(TABLES / "coverage_by_inverter.csv", index=False)
+    dropped = coverage[~coverage["kept"]]
+    print(f"  daylight coverage (irradiance >= {DAYLIGHT_WM2} W/m2): "
+          f"min {coverage['coverage'].min():.1%}, median {coverage['coverage'].median():.1%}")
+    print(f"  dropped (< {MIN_COVERAGE:.0%}): {len(dropped)} inverters")
+    for _, r in dropped.iterrows():
+        print(f"    {r['inverter_id']}: coverage {r['coverage']:.1%}")
+
+    final = merged[merged["inverter_id"].isin(coverage.loc[coverage["kept"], "inverter_id"])]
+    final = final.reset_index(drop=True)
+    final["inverter_id"] = final["inverter_id"].cat.remove_unused_categories()
+    summary.append(summary_row(f"coverage filter (>= {MIN_COVERAGE:.0%})", final))
+
     out = PROCESSED / MERGED_NAME
-    merged.to_parquet(out, index=False)
-    print(f"Saved {out.relative_to(ROOT)}: {len(merged):,} rows x {merged.shape[1]} columns")
+    final.to_parquet(out, index=False)
+    print(f"Saved {out.relative_to(ROOT)}: {len(final):,} rows x {final.shape[1]} columns")
+
+    summary = pd.DataFrame(summary)
+    summary.to_csv(TABLES / "prep_summary.csv", index=False)
+    print(summary.to_string(index=False))
 
 
 if __name__ == "__main__":

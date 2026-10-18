@@ -10,6 +10,7 @@ timezone: Asia/Hong_Kong
 # Stage 3: data preparation
 resample_freq: 15min
 min_daylight_coverage: 0.70
+daylight_irradiance_wm2: 50   # a bin counts as daylight for coverage if irradiance >= this
 
 # Stage 11: chronological split
 split:

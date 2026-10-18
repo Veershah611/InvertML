@@ -1,21 +1,19 @@
 # Team Progress (by pipeline stage)
 
-Status: ✅ done · 🔄 in progress · ⬜ not started
-
 | # | Stage | A1 | A2 | B1 | B2 |
 |---|---|---|---|---|---|
-| 0 | Repo setup | ✅ Skeleton, config.yaml, venv | ⬜ | ⬜ | ⬜ |
-| 1 | Problem definition | ⬜ Lead | — | — | — |
-| 2 | Data acquisition | 🔄 Download, licence, README column table | — | — | ⬜ GPVS-Faults loader |
-| 3 | Data preparation | ⬜ Lead: metadata, Parquet, resample, merge, gaps | — | — | — |
-| 4 | Preprocessing | — | ⬜ Lead | — | — |
-| 5 | Balancing | ⬜ | ⬜ Lead: imbalance study | ⬜ | ⬜ |
-| 6 | EDA | ⬜ Power vs. irradiance; gap heatmap | ⬜ Temperature; correlation | ⬜ Degradation; underperformers | ⬜ Seasonality; class distribution |
-| 7 | Features | ⬜ Outage features | ⬜ Lag & rolling | ⬜ Lead: PR, deviations, target | ⬜ Time + metadata |
-| 8 | Baselines | ⬜ Lead: persistence, Ridge, majority, rule, Logistic | — | — | — |
-| 9 | Model | ⬜ Linear | ⬜ Random Forest | ⬜ XGBoost | ⬜ MLP |
-| 10 | Tuning | ⬜ GridSearch | ⬜ RandomizedSearch | ⬜ Optuna | ⬜ RandomizedSearch |
-| 11 | Evaluation | ⬜ | ⬜ | ⬜ | ⬜ Lead: splits, evaluate.py |
-| — | Isolation Forest | ⬜ HKUST injected faults | ⬜ HKUST injected faults | ⬜ GPVS-Faults | ⬜ GPVS-Faults |
-| 12 | Impact & limitations | — | — | — | ⬜ Lead |
-| — | Write-up | ⬜ Reproducibility | ⬜ Leakage audit | ⬜ Feature/target justification | ⬜ AI-usage log |
+| 0 | Repo setup | Done: skeleton, config.yaml, venv, requirements | To do | To do | To do |
+| 1 | Problem definition | Done: §1 of the assignment doc (lead) | — | — | — |
+| 2 | Data acquisition | In progress: column table and findings done; licence check left | — | — | To do: GPVS-Faults loader |
+| 3 | Data preparation | Done (lead): metadata, Parquet, 15-min resample, merge, gap analysis, before/after table. To do: share `hkust_15min_v1.parquet` | — | — | — |
+| 4 | Preprocessing | — | To do (lead) | — | — |
+| 5 | Balancing | To do | To do (lead): imbalance study | To do | To do |
+| 6 | EDA | To do: power vs. irradiance; gap heatmap | To do: temperature; correlation | To do: degradation; underperformers | To do: seasonality; class distribution |
+| 7 | Features | To do: outage features | To do: lag & rolling | To do (lead): PR, deviations, target | To do: time + metadata |
+| 8 | Baselines | To do (lead): persistence, Ridge, majority, rule, Logistic | — | — | — |
+| 9 | Model | To do: linear | To do: Random Forest | To do: XGBoost | To do: MLP |
+| 10 | Tuning | To do: GridSearch | To do: RandomizedSearch | To do: Optuna | To do: RandomizedSearch |
+| 11 | Evaluation | To do | To do | To do | To do (lead): splits, evaluate.py |
+| — | Isolation Forest | To do: HKUST injected faults | To do: HKUST injected faults | To do: GPVS-Faults | To do: GPVS-Faults |
+| 12 | Impact & limitations | — | — | — | To do (lead) |
+| — | Write-up | To do: reproducibility | To do: leakage audit | To do: feature/target justification | To do: AI-usage log |
