@@ -1,6 +1,6 @@
 # Solar Inverter Health Monitoring & Predictive Maintenance System
 
-An end-to-end machine learning project that predicts inverter health, classifies operational status, and flags anomalous behaviour, using **three years of inverter-level telemetry from 60 rooftop PV stations** plus on-site weather data. A team of four builds it. The work follows the 12-stage pipeline in the Innovative Assignment guidelines, and every major decision is justified and validated.
+An end-to-end machine learning project that predicts inverter health, classifies operational status, and flags anomalous behaviour, using **up to three years of inverter-level telemetry from 44 inverters at 37 rooftop PV stations** (out of the dataset's 60) plus on-site weather data. A team of four builds it. The work follows the 12-stage pipeline in the Innovative Assignment guidelines, and every major decision is justified and validated.
 
 ---
 
@@ -46,8 +46,8 @@ Every stage is either implemented or explicitly marked "not applicable" with a r
 3. Anomaly flag from an unsupervised detector, for failure patterns the labels do not cover.
 
 **Constraints.**
-* No ground-truth maintenance or fault logs are available for the 60 stations, so labels must be engineered (§7.2). Real fault labels come only from the secondary dataset (§2.2).
-* A single weather station serves all 60 rooftops.
+* No ground-truth maintenance or fault logs are available for these stations, so labels must be engineered (§7.2). Real fault labels come only from the secondary dataset (§2.2).
+* A single weather station serves all 37 rooftops.
 * Data is time-ordered, so any evaluation must respect chronology.
 * Everything must train on CPU-only laptops (§12).
 
@@ -60,30 +60,45 @@ Every stage is either implemented or explicitly marked "not applicable" with a r
 ### 2.1 Primary dataset: HKUST Rooftop PV (2021–2023)
 * **Source:** Lin et al., *A high-resolution three-year dataset supporting rooftop photovoltaics (PV) generation analytics*, Scientific Data (2025). Data on Dryad: https://doi.org/10.5061/dryad.m37pvmd99
 * **Ownership / licence:** Published on Dryad (Hong Kong University of Science and Technology). Dryad datasets are normally released under CC0. **Action (A1): confirm the licence on the Dryad page and record it in the report together with the paper citation.**
-* **Collection method:** 60 grid-connected rooftop PV stations on the HKUST campus. Generation data is logged at the **inverter level every 5 minutes**. Weather comes from **one on-site station every 1 minute**. Data was collected over Wi-Fi and RS232/RS485 loggers into a central database.
-* **Size:** about 296 MB zipped. At full resolution this is roughly 19M generation rows before any filtering (estimate; confirm in the notebook).
+* **Collection method:** 60 grid-connected rooftop PV stations on the HKUST campus. Inverter-level data every 5 minutes exists only for the 37 stations with panel-level optimizers; the other 23 have hourly site-level data only. Weather comes from **one on-site station every 1 minute**. Data was collected over Wi-Fi and RS232/RS485 loggers into a central database.
+* **Size:** about 296 MB zipped. Inverter-level files: **4,766,698 rows** across 44 CSVs (633 MB unzipped), about 1.6M rows after 15-min resampling.
 * **Metadata:** stored as a **Brick schema model (`.ttl`)**, queried with SPARQL (Python `rdflib`). It holds station specifications such as capacity and orientation.
-* **Panel-level optimizer data:** 37 of the 60 stations also have panel-level optimizer data. **Out of scope**: we use inverter-level data only. Reason: it keeps the data size manageable, and the project is about inverters.
+* **Panel-level optimizer data:** 37 of the 60 stations have panel-level optimizers, but the dataset package contains **no panel-level files**, only inverter- and site-level files for those stations.
 
-**Columns:** ⚠️ The column list must be read from the dataset's README before the feature design is frozen. A1 fills in this table in week 1:
+**Columns** (verified by A1 from the dataset files):
 
 | Column | Type | Unit | Available? |
 |---|---|---|---|
-| Timestamp | datetime | HKT | ✓ |
-| Station / inverter ID | categorical | — | ✓ |
-| AC power / energy | float | kW / kWh | expected |
-| DC power, DC voltage/current | float | kW, V, A | **verify** |
-| Irradiance (GHI and/or plane-of-array) | float | W/m² | expected |
-| Ambient temperature | float | °C | expected |
-| Module temperature | float | °C | **verify** |
-| Wind speed, humidity | float | m/s, % | verify |
+| `Time` | datetime | HKT (assumed; README does not state it) | ✓ all files |
+| Station / inverter ID | categorical | — | ✓ from the file name |
+| `totalActivePower` (AC power) | float | **W** | ✓ inverter files |
+| Per-phase L1/L2/L3: AC current, AC voltage, AC frequency, active power, reactive power | float | A, V, Hz, W | ✓ inverter files |
+| `dcVoltage` | float | V | ✓ inverter files |
+| DC current / DC power | — | — | ✗ not provided |
+| `generation` (energy), `power` | float | kWh, W | ✓ site-level files only |
+| Irradiance (single sensor; GHI vs. plane-of-array not stated) | float | W/m² | ✓ 1-min |
+| Ambient temperature | float | °C | ✓ 1-min |
+| Module temperature | — | — | ✗ not provided |
+| Wind speed / direction, relative humidity, rainfall, sea-level pressure, visibility | float | m/s, °, %, mm, hPa, km | ✓ 1-min |
 
-The feature design (§7) works with **AC power + irradiance + ambient temperature + capacity** alone. Features that need DC power or module temperature are marked *conditional*.
+The feature design (§7) works with **AC power + irradiance + ambient temperature + capacity** alone. Both *conditional* features (AC/DC conversion efficiency and module − ambient temperature) are **not possible** with this dataset.
+
+**Scope decision (A1): inverter-level data only.** That means **44 inverters at 37 stations**, the stations with panel-level optimizers. The other 23 stations have only hourly site-level data and are excluded. Inverter data (5-min) is resampled to 15-min.
+
+**Dataset findings (A1, from inspecting the files):**
+* Folder layout: `PV generation dataset/` holds `PV stations with panel level optimizer/` (44 inverter-level CSVs at 5-min plus 37 site-level CSVs at 15-min) and `PV stations without panel level optimizer/` (23 site-level CSVs at **1-hour**). The README's "5-minute for all stations" holds only for the inverter files.
+* `Meteorological dataset/` has 7 variables, one file per year (2021–2023), at 1-min resolution.
+* Start dates vary by inverter: most start between May and Oct 2021, and none start in Jan 2021. Six inverters start only in 2023 (SQ Block P, Shaw Auditorium, UG Hall8, UG Hall9, Zone A2 Inverter 2 and 3), so they cannot appear in the training period. **B2: this affects the chronological split and the unseen-station choice (§11.1).**
+* Inverter files contain daytime rows only (about 06:00–17:55). Missing night rows are expected and are not gaps.
+* Two timestamp formats are mixed across files (`2021-05-04 07:00:00` and `2021/5/1 6:00`). Weather files use the second format.
+* `Rainfall_2021` is `.xlsx`; the other years are `.csv`.
+* Site-level file quirks (not used, but noted): `Zone L1 (Station 1)` has a duplicate first timestamp and runs into 2024. `SQ14` starts in 2023 but has as many rows as files that start in 2021, so its start date is probably wrong.
+* Licence: the README says "Licenses: N/A", and its citation is still "under review". Confirm the licence and citation on the Dryad page.
 
 **Target variable.** None is provided. The health score and status labels are **engineered** (§7.2), and the report must say so plainly.
 
 **Known limitations to document.**
-* One weather station for 60 rooftops. Local shading and orientation differences show up as station-level offsets.
+* One weather station for 37 rooftops. Local shading and orientation differences show up as station-level offsets.
 * Urban rooftop systems are smaller and more heterogeneous than utility-scale farms.
 * Gaps from Wi-Fi and communication failures. These matter: they are themselves a real "inverter offline" signal.
 * No real fault labels for these stations.
@@ -239,7 +254,7 @@ For each model, document its assumptions, why it suits this problem, and where i
   * Train: Jan 2021 – Jun 2022 (18 months)
   * Validation: Jul 2022 – Dec 2022 (6 months)
   * Test: **all of 2023** (12 months, so every season is in the test set)
-* **Unseen-station test:** hold out about 20% of stations (≈ 12) completely. Train on the other stations, then evaluate on the held-out stations in 2023. This answers the guidelines' question "how would the solution work with new/unseen data?"
+* **Unseen-station test:** hold out about 20% of stations (**≈ 7 of 37**) completely. Train on the other stations, then evaluate on the held-out stations in 2023. This answers the guidelines' question "how would the solution work with new/unseen data?" Stations that start only in 2023 have no training data, so they are natural candidates for this set.
 * **Real-fault check:** GPVS-Faults (§2.2).
 * Fixed random seeds (`random_state=42`) everywhere.
 
