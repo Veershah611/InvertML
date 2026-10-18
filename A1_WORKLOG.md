@@ -52,6 +52,27 @@
 - Outputs in `reports/tables/`: `gaps_by_inverter_month.csv`, `coverage_by_inverter.csv`, and `prep_summary.csv` (the before/after table: 4,766,698 × 19 → 1,588,901 × 20 → 1,588,901 × 45, 44 inverters throughout).
 - For A2 (Stage 4): 94,441 bins have `n_valid_5min = 0` (a row exists but all power values are NA). 21k bins have 1–2 valid readings. 12,172 rows have no weather data (`n_valid_1min = 0`).
 
+**Stage 6: EDA, Q1 power vs irradiance + Q2 gaps** (Done) ([src/eda.py](src/eda.py), [notebooks/01_eda_A1.ipynb](notebooks/01_eda_A1.ipynb))
+- Code is in `src/eda.py`; the notebook is a thin driver with a finding and a decision under every plot. It runs top to bottom in about 1 minute.
+- 7 figures in `reports/figures/a1_q*.png`.
+- **Q1 findings:**
+  - Most inverters have a slope of 0.6-0.8 kW/kWp per 1000 W/m².
+  - Inverter clipping is visible at about 0.75-0.8 kW/kWp.
+  - 99% of bins produce power from **50 W/m²** upward (about 75% at 20 W/m²), which supports a 50 W/m² night threshold.
+- **Irradiance sensor change on 2023-02-14:**
+  - Output per unit irradiance drops from about 0.9 to about 0.5 for all inverters at once.
+  - Peak irradiance jumps from about 840 to about 1,400 W/m², with a 3,609 W/m² spike that day.
+  - Raw irradiance is therefore not on the same scale in the 2023 test year. The team must decide: rescale, use peer deviation, or add a period flag.
+- **Zone D capacities are wrong:**
+  - Inverter 2 reaches 50.1 kW on a 25 kW inverter (slope 1.31).
+  - Inverter 1 has slope 0.32.
+- Indoor Sports Centre's capacity is consistent with its data; the "10 kW" inverter model in the metadata is the error.
+- **Q2 findings:**
+  - 78.5% of gaps are whole days (4-12 daylight hours) and 5.7% are multi-day, together holding 99% of missing data.
+  - Gaps of up to 1 hour are 0.4% of missing data.
+  - The 06:00 hour is 28% missing (inverters asleep); other hours are 3.8%.
+  - Several outages hit all inverters at a station at once (Library, S H Ho, Zone J1 + A7), which points to communication failures.
+
 ## Open issues
 - Licence: the README says "N/A". Confirm CC0 and the published citation on the Dryad page.
 - Tilt is empty for UG Hall4 and Hall7 (`"0/15deg"`, `"0/11deg"`). Azimuth is `"Mixed"` for several stations.
@@ -60,7 +81,7 @@
 
 ## To do (A1)
 - [ ] Share `hkust_15min_v1.parquet` with the team (Drive/OneDrive)
-- [ ] EDA: power vs. irradiance; gaps/offline heatmap
+- [ ] Tell the team about the irradiance sensor change and the Zone D capacities (see EDA)
 - [ ] Features: `is_offline`, minutes offline in the last 24 h
 - [ ] Baselines: persistence, Ridge; majority, rule-based, Logistic
 - [ ] GridSearch tuning; coefficients + permutation importance
