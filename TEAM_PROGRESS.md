@@ -11,7 +11,7 @@
 | 6 | EDA | Done: power vs. irradiance; gap heatmap (`notebooks/01_eda_A1.ipynb`) | To do: temperature; correlation | To do: degradation; underperformers | Done: seasonality; class distribution (`notebooks/01_eda_B2.ipynb`) |
 | 7 | Features | To do: outage features | To do: lag & rolling | To do (lead): PR, deviations, target | Done: time + metadata (`src/features.py`) |
 | 8 | Baselines | To do (lead): persistence, Ridge, majority, rule, Logistic | — | — | — |
-| 9 | Model | To do: linear | To do: Random Forest | To do: XGBoost | To do: MLP |
+| 9 | Model | To do: linear | To do: Random Forest | To do: XGBoost | Done: MLP (`src/models/mlp.py`) |
 | 10 | Tuning | To do: GridSearch | To do: RandomizedSearch | To do: Optuna | To do: RandomizedSearch |
 | 11 | Evaluation | To do | To do | To do | Done (lead): splits, evaluate.py, fault injection, logger |
 | — | Isolation Forest | To do: HKUST injected faults | To do: HKUST injected faults | To do: GPVS-Faults | In progress: GPVS loader in evaluate.py |
