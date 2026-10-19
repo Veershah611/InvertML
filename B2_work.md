@@ -256,7 +256,7 @@ solar-health/
 * [ ] Complete EDA Question 1 (Seasonality yield plots) and EDA Question 2 (Class distributions).
 
 ### Week 2: Features, Baseline Run & Framework Freeze
-* [ ] Write cyclic time features (`hour_sin`, `hour_cos`, `day_sin`, `day_cos`) and metadata encoders in `src/features.py`.
+* [x] Write cyclic time features (`hour_sin`, `hour_cos`, `day_sin`, `day_cos`) and metadata encoders in `src/features.py`.
 * [ ] Freeze `src/evaluate.py` so all teammates can test their Week 2 models.
 * [ ] Build first untuned MLP baseline with `StandardScaler` on a 10% sample; verify pipeline runs without errors.
 
