@@ -8,7 +8,7 @@
 | 3 | Data preparation | Done (lead): metadata, Parquet, 15-min resample, merge, gap analysis, before/after table. To do: share `hkust_15min_v1.parquet` | — | — | — |
 | 4 | Preprocessing | — | To do (lead) | — | — |
 | 5 | Balancing | To do | To do (lead): imbalance study | To do | To do |
-| 6 | EDA | Done: power vs. irradiance; gap heatmap (`notebooks/01_eda_A1.ipynb`) | To do: temperature; correlation | To do: degradation; underperformers | To do: seasonality; class distribution |
+| 6 | EDA | Done: power vs. irradiance; gap heatmap (`notebooks/01_eda_A1.ipynb`) | To do: temperature; correlation | To do: degradation; underperformers | Done: seasonality; class distribution (`notebooks/01_eda_B2.ipynb`) |
 | 7 | Features | To do: outage features | To do: lag & rolling | To do (lead): PR, deviations, target | To do: time + metadata |
 | 8 | Baselines | To do (lead): persistence, Ridge, majority, rule, Logistic | — | — | — |
 | 9 | Model | To do: linear | To do: Random Forest | To do: XGBoost | To do: MLP |
