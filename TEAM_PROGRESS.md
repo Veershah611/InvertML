@@ -12,7 +12,7 @@
 | 7 | Features | To do: outage features | To do: lag & rolling | To do (lead): PR, deviations, target | Done: time + metadata (`src/features.py`) |
 | 8 | Baselines | To do (lead): persistence, Ridge, majority, rule, Logistic | — | — | — |
 | 9 | Model | To do: linear | To do: Random Forest | To do: XGBoost | Done: MLP (`src/models/mlp.py`) |
-| 10 | Tuning | To do: GridSearch | To do: RandomizedSearch | To do: Optuna | To do: RandomizedSearch |
+| 10 | Tuning | To do: GridSearch | To do: RandomizedSearch | To do: Optuna | Done: GridSearchCV (`src/models/mlp.py`) |
 | 11 | Evaluation | To do | To do | To do | Done (lead): splits, evaluate.py, fault injection, logger |
 | — | Isolation Forest | To do: HKUST injected faults | To do: HKUST injected faults | To do: GPVS-Faults | In progress: GPVS loader in evaluate.py |
 | 12 | Impact & limitations | — | — | — | To do (lead) |

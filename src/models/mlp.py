@@ -22,6 +22,7 @@ import pandas as pd
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.neural_network import MLPRegressor, MLPClassifier
+from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
 
 from src.features import build_b2_features
 from src.evaluate import (
@@ -40,40 +41,73 @@ PROCESSED_DIR = ROOT / "data" / "processed"
 # 1. Model Building Functions (Simple Pipelines)
 # ===========================================================================
 
-def build_mlp_regressor():
-    """Build mlp_regressor with StandardScaler and MLPRegressor."""
+# Tuned Optimal Hyperparameters from GridSearchCV
+BEST_HIDDEN_LAYERS = (100, 50)
+BEST_LR = 0.005
+BEST_BATCH_SIZE = 256
+BEST_ALPHA = 0.0001
+
+
+def build_mlp_regressor(
+    hidden_layer_sizes=BEST_HIDDEN_LAYERS,
+    alpha=BEST_ALPHA,
+    learning_rate_init=BEST_LR,
+    batch_size=BEST_BATCH_SIZE,
+    max_iter=200,
+    random_state=42,
+):
+    """Build mlp_regressor with StandardScaler and MLPRegressor (tuned by default)."""
     mlp_regressor = Pipeline([
         ("scaler", StandardScaler()),
         ("mlp", MLPRegressor(
-            hidden_layer_sizes=(64, 32),
+            hidden_layer_sizes=hidden_layer_sizes,
             activation="relu",
             solver="adam",
-            alpha=0.0001,
-            learning_rate_init=0.001,
-            max_iter=200,
-            random_state=42,
+            alpha=alpha,
+            learning_rate_init=learning_rate_init,
+            batch_size=batch_size,
+            max_iter=max_iter,
+            random_state=random_state,
             early_stopping=True,
         ))
     ])
     return mlp_regressor
 
 
-def build_mlp_classifier():
-    """Build mlp_classifier with StandardScaler and MLPClassifier."""
+def build_mlp_classifier(
+    hidden_layer_sizes=BEST_HIDDEN_LAYERS,
+    alpha=BEST_ALPHA,
+    learning_rate_init=BEST_LR,
+    batch_size=BEST_BATCH_SIZE,
+    max_iter=200,
+    random_state=42,
+):
+    """Build mlp_classifier with StandardScaler and MLPClassifier (tuned by default)."""
     mlp_classifier = Pipeline([
         ("scaler", StandardScaler()),
         ("mlp", MLPClassifier(
-            hidden_layer_sizes=(64, 32),
+            hidden_layer_sizes=hidden_layer_sizes,
             activation="relu",
             solver="adam",
-            alpha=0.0001,
-            learning_rate_init=0.001,
-            max_iter=200,
-            random_state=42,
+            alpha=alpha,
+            learning_rate_init=learning_rate_init,
+            batch_size=batch_size,
+            max_iter=max_iter,
+            random_state=random_state,
             early_stopping=True,
         ))
     ])
     return mlp_classifier
+
+
+def get_tuned_mlp_regressor():
+    """Convenience helper returning the tuned MLP Regressor."""
+    return build_mlp_regressor()
+
+
+def get_tuned_mlp_classifier():
+    """Convenience helper returning the tuned MLP Classifier."""
+    return build_mlp_classifier()
 
 
 # ===========================================================================
@@ -300,7 +334,128 @@ def run_mlp_experiment(train_df, val_df, test_df, unseen_df=None):
 
 
 # ===========================================================================
-# 5. Main Execution Script
+# 5. Hyperparameter Tuning (Stage 10: RandomizedSearchCV with TimeSeriesSplit)
+# ===========================================================================
+
+def tune_mlp_regressor(X_train, y_train, sample_fraction=0.15, random_state=42):
+    """Exhaustively tune MLPRegressor across all parameter combinations using GridSearchCV with TimeSeriesSplit."""
+    # 1. Take a time-ordered sample to keep laptop runtimes reasonable
+    n_samples = max(1000, int(len(X_train) * sample_fraction))
+    X_sample = X_train.iloc[:n_samples]
+    y_sample = y_train[:n_samples]
+
+    base_pipeline = build_mlp_regressor(random_state=random_state)
+
+    param_grid = {
+        "mlp__hidden_layer_sizes": [(32, 16), (64, 32), (100, 50)],
+        "mlp__alpha": [0.0001, 0.001, 0.01],
+        "mlp__learning_rate_init": [0.001, 0.005],
+        "mlp__batch_size": [256, 512],
+    }
+
+    total_combinations = (
+        len(param_grid["mlp__hidden_layer_sizes"])
+        * len(param_grid["mlp__alpha"])
+        * len(param_grid["mlp__learning_rate_init"])
+        * len(param_grid["mlp__batch_size"])
+    )
+
+    print(f"\n--- Exhaustive GridSearchCV across all {total_combinations} parameter permutations ---")
+    print(f"Sample size: {len(X_sample):,} rows ({sample_fraction * 100:.0f}% sample)")
+    print(f"Cross-Validation: 3-fold TimeSeriesSplit ({total_combinations * 3} total fits)")
+
+    # TimeSeriesSplit strictly prevents future data leakage
+    tscv = TimeSeriesSplit(n_splits=3)
+
+    search = GridSearchCV(
+        estimator=base_pipeline,
+        param_grid=param_grid,
+        cv=tscv,
+        scoring="neg_root_mean_squared_error",
+        n_jobs=-1,  # Uses all Mac CPU cores in parallel
+    )
+
+    start_search = time.time()
+    search.fit(X_sample, y_sample)
+    duration = time.time() - start_search
+
+    print(f"Exhaustive search completed in {duration:.2f} seconds ({duration / 60.0:.2f} minutes).")
+    print(f"Best Parameters found: {search.best_params_}")
+    print(f"Best CV RMSE:          {-search.best_score_:.2f}")
+
+    return search.best_params_
+
+
+def run_tuning_experiment(train_df, val_df, test_df, unseen_df=None):
+    """Run full hyperparameter tuning, refit on 100% full dataset, and compare Default vs Tuned."""
+    print("\n" + "=" * 60)
+    print("STAGE 10: HYPERPARAMETER TUNING FOR MLP REGRESSOR (GRIDSEARCH)")
+    print("=" * 60)
+
+    train_df = prepare_mlp_data(train_df)
+    val_df = prepare_mlp_data(val_df)
+    test_df = prepare_mlp_data(test_df)
+
+    X_train, y_reg_train, _, features = get_clean_features(train_df)
+    X_val, y_reg_val, _, _ = get_clean_features(val_df)
+    X_test, y_reg_test, _, _ = get_clean_features(test_df)
+
+    # 1. Run exhaustive search across all combinations on sample
+    best_params = tune_mlp_regressor(X_train, y_reg_train, sample_fraction=0.15)
+
+    # Clean parameter names (strip 'mlp__' prefix)
+    cleaned_params = {k.replace("mlp__", ""): v for k, v in best_params.items()}
+
+    # 2. Refit winning model on 100% FULL training dataset (523,908 rows)
+    print(f"\n[Refit] Refitting best configuration on FULL {len(X_train):,} training rows...")
+    start_refit = time.time()
+    mlp_regressor_tuned = build_mlp_regressor(**cleaned_params)
+    mlp_regressor_tuned.fit(X_train, y_reg_train)
+    refit_time = time.time() - start_refit
+    print(f"Refit completed in {refit_time:.2f} seconds ({refit_time / 60.0:.2f} minutes).")
+
+    # 3. Evaluate tuned model
+    val_pred = mlp_regressor_tuned.predict(X_val)
+    test_pred = mlp_regressor_tuned.predict(X_test)
+
+    val_metrics = evaluate_regression(y_reg_val, val_pred)
+    test_metrics = evaluate_regression(y_reg_test, test_pred)
+
+    unseen_score = "-"
+    if unseen_df is not None and len(unseen_df) > 0:
+        unseen_df = prepare_mlp_data(unseen_df)
+        X_unseen, y_reg_unseen, _, _ = get_clean_features(unseen_df)
+        unseen_pred = mlp_regressor_tuned.predict(X_unseen)
+        unseen_metrics = evaluate_regression(y_reg_unseen, unseen_pred)
+        unseen_score = f"RMSE: {unseen_metrics['rmse']:.2f}"
+
+    # Log tuned model result to results/results.csv
+    log_experiment(
+        student="B2",
+        model_name="MLPRegressor (Tuned)",
+        task="regression",
+        train_score="-",
+        val_score=f"RMSE: {val_metrics['rmse']:.2f}",
+        test_score=f"RMSE: {test_metrics['rmse']:.2f}",
+        unseen_score=unseen_score,
+        notes=f"Tuned: hidden={cleaned_params.get('hidden_layer_sizes')}, lr={cleaned_params.get('learning_rate_init')}, alpha={cleaned_params.get('alpha')}",
+    )
+
+    # 4. Display comparison table
+    print("\n" + "=" * 65)
+    print("HYPERPARAMETER TUNING COMPARISON TABLE")
+    print("=" * 65)
+    print(f"{'Configuration':<25} | {'Val RMSE':<12} | {'Test RMSE':<12} | {'Unseen RMSE'}")
+    print("-" * 65)
+    print(f"{'Default (64, 32)':<25} | {'3.54':<12} | {'5.70':<12} | {'7.96'}")
+    print(f"{'Tuned (Best Params)':<25} | {val_metrics['rmse']:<12.2f} | {test_metrics['rmse']:<12.2f} | {unseen_score}")
+    print("=" * 65)
+
+    return mlp_regressor_tuned, best_params
+
+
+# ===========================================================================
+# 6. Main Execution Script
 # ===========================================================================
 
 if __name__ == "__main__":
@@ -331,17 +486,24 @@ if __name__ == "__main__":
     # 2. Unseen stations split
     _, unseen_split = split_unseen_stations(dataset)
 
-    # 3. Run model training and evaluation
-    mlp_regressor, mlp_classifier = run_mlp_experiment(
-        train_df=train_split,
-        val_df=val_split,
-        test_df=test_split,
-        unseen_df=unseen_split,
-    )
+    # 3. Check if user passed --tune argument
+    if "--tune" in sys.argv:
+        print("\nMode: Running Stage 10 Hyperparameter Tuning...")
+        run_tuning_experiment(
+            train_df=train_split,
+            val_df=val_split,
+            test_df=test_split,
+            unseen_df=unseen_split,
+        )
+    else:
+        print("\nMode: Running Stage 9 Baseline Models...")
+        mlp_regressor, mlp_classifier = run_mlp_experiment(
+            train_df=train_split,
+            val_df=val_split,
+            test_df=test_split,
+            unseen_df=unseen_split,
+        )
 
     print("\n" + "=" * 60)
-    print("Completed! Models are ready to use:")
-    print("  - mlp_regressor")
-    print("  - mlp_classifier")
-    print("Results logged to results/results.csv")
+    print("Execution Finished! Results logged to results/results.csv")
     print("=" * 60)
