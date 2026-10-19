@@ -13,7 +13,7 @@
 | 8 | Baselines | To do (lead): persistence, Ridge, majority, rule, Logistic | — | — | — |
 | 9 | Model | To do: linear | To do: Random Forest | To do: XGBoost | To do: MLP |
 | 10 | Tuning | To do: GridSearch | To do: RandomizedSearch | To do: Optuna | To do: RandomizedSearch |
-| 11 | Evaluation | To do | To do | To do | To do (lead): splits, evaluate.py |
-| — | Isolation Forest | To do: HKUST injected faults | To do: HKUST injected faults | To do: GPVS-Faults | To do: GPVS-Faults |
+| 11 | Evaluation | To do | To do | To do | Done (lead): splits, evaluate.py, fault injection, logger |
+| — | Isolation Forest | To do: HKUST injected faults | To do: HKUST injected faults | To do: GPVS-Faults | In progress: GPVS loader in evaluate.py |
 | 12 | Impact & limitations | — | — | — | To do (lead) |
 | — | Write-up | To do: reproducibility | To do: leakage audit | To do: feature/target justification | To do: AI-usage log |
