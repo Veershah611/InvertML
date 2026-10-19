@@ -1,4 +1,4 @@
-"""Stage 9 Supervised Modeling (Track T4): Multi-Layer Perceptron (MLP).
+"""Stage 9 Supervised Modeling & Stage 11 Explainability (Track T4): Multi-Layer Perceptron (MLP).
 
 Student Owner: B2 (Evaluation Architect & Neural Network Specialist).
 
@@ -8,10 +8,14 @@ This module implements:
 3. Leakage-free Pipeline with StandardScaler.
 4. Comparison between Method 1 (Dedicated Classifier) and Method 2 (Thresholded Regressor).
 5. Evaluation on chronological splits and unseen stations.
-6. Logging results to results/results.csv.
+6. Hyperparameter tuning with TimeSeriesSplit (Stage 10).
+7. Model Explainability & Error Analysis: Permutation Importance, PDP, and Failure Cases (Task 7).
+8. Logging results to results/results.csv.
 
-Run this file directly to test the models:
-    python -m src.models.mlp
+Commands:
+    python -m src.models.mlp           # Run baseline models
+    python -m src.models.mlp --tune    # Run hyperparameter tuning
+    python -m src.models.mlp --explain # Run Task 7 explainability analysis
 """
 
 import sys
@@ -23,6 +27,8 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.neural_network import MLPRegressor, MLPClassifier
 from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
+from sklearn.inspection import permutation_importance, PartialDependenceDisplay
+import matplotlib.pyplot as plt
 
 from src.features import build_b2_features
 from src.evaluate import (
@@ -195,9 +201,10 @@ def get_clean_features(df):
             usable_columns.append(col)
 
     X = df[usable_columns].copy()
+    X = X.astype(np.float64)
     X = X.fillna(X.mean(numeric_only=True))
 
-    y_regression = df["health_score"].values
+    y_regression = df["health_score"].values.astype(np.float64)
     y_classification = df["status"].values
 
     return X, y_regression, y_classification, usable_columns
@@ -455,7 +462,148 @@ def run_tuning_experiment(train_df, val_df, test_df, unseen_df=None):
 
 
 # ===========================================================================
-# 6. Main Execution Script
+# 6. Model Explainability & Error Analysis (Task 7)
+# ===========================================================================
+
+def plot_permutation_importance(model, X, y, feature_names, save_path="reports/figures/b2_permutation_importance.png", sample_size=10000):
+    """Compute and plot permutation feature importance on a test sample."""
+    print(f"\nComputing Permutation Feature Importance (sample_size={sample_size:,})...")
+    if len(X) > sample_size:
+        indices = np.random.RandomState(42).choice(len(X), size=sample_size, replace=False)
+        X_sample = X.iloc[indices] if hasattr(X, "iloc") else X[indices]
+        y_sample = y[indices]
+    else:
+        X_sample = X
+        y_sample = y
+
+    result = permutation_importance(
+        estimator=model,
+        X=X_sample,
+        y=y_sample,
+        n_repeats=5,
+        random_state=42,
+        n_jobs=-1,
+    )
+
+    # Sort features by importance (ascending for horizontal bar chart)
+    sorted_idx = result.importances_mean.argsort()
+
+    Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+    plt.figure(figsize=(10, 6))
+    plt.barh(range(len(sorted_idx)), result.importances_mean[sorted_idx], align="center", color="#1f77b4")
+    plt.yticks(range(len(sorted_idx)), [feature_names[i] for i in sorted_idx])
+    plt.xlabel("Permutation Importance (Increase in RMSE when shuffled)")
+    plt.title("MLP Feature Importance Ranking (Permutation Method)", fontsize=13, fontweight="bold")
+    plt.grid(axis="x", linestyle="--", alpha=0.5)
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300)
+    plt.close()
+    print(f"Permutation importance plot saved to: {save_path}")
+
+    # Print rankings
+    print("\nFeature Importance Rankings:")
+    for rank, idx in enumerate(reversed(sorted_idx), 1):
+        print(f"  {rank:2d}. {feature_names[idx]:<18} : {result.importances_mean[idx]:.4f} +/- {result.importances_std[idx]:.4f}")
+
+    return result
+
+
+def plot_partial_dependence(model, X, features_to_plot=None, save_path="reports/figures/b2_partial_dependence.png", sample_size=10000):
+    """Generate and save Partial Dependence Plots (PDP) for key physical features."""
+    print(f"\nGenerating Partial Dependence Plots (PDP) (sample_size={sample_size:,})...")
+    if features_to_plot is None:
+        features_to_plot = ["irradiance_wm2", "temp_c", "capacity_kwp"]
+
+    # Filter features that exist in X
+    valid_features = [f for f in features_to_plot if f in X.columns]
+
+    if len(X) > sample_size:
+        indices = np.random.RandomState(42).choice(len(X), size=sample_size, replace=False)
+        X_sample = X.iloc[indices].copy().astype(np.float64)
+    else:
+        X_sample = X.copy().astype(np.float64)
+
+    Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(14, 4))
+    PartialDependenceDisplay.from_estimator(
+        estimator=model,
+        X=X_sample,
+        features=valid_features,
+        ax=ax,
+        grid_resolution=30,
+        random_state=42,
+    )
+    plt.suptitle("MLP Partial Dependence Plots (Physical Response Curves)", fontsize=13, fontweight="bold")
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300)
+    plt.close()
+    print(f"Partial dependence plot saved to: {save_path}")
+
+
+def get_top_failure_cases(model, test_df, X_test, y_test, top_n=3):
+    """Identify top N largest prediction errors on the test set and print diagnostic table."""
+    print(f"\nIdentifying Top {top_n} Failure Cases (Worst Residual Errors)...")
+    preds = model.predict(X_test)
+    residuals = np.abs(y_test - preds)
+
+    # Get integer positions of worst errors
+    worst_idx = np.argsort(residuals)[-top_n:][::-1]
+
+    failures = []
+    for idx in worst_idx:
+        row = test_df.iloc[idx]
+        failures.append({
+            "timestamp": str(row["time"]) if "time" in row else str(row.get("timestamp", "-")),
+            "inverter_id": str(row["inverter_id"]) if "inverter_id" in row else "-",
+            "actual_health": round(float(y_test[idx]), 2),
+            "predicted_health": round(float(preds[idx]), 2),
+            "error_points": round(float(residuals[idx]), 2),
+            "irradiance_wm2": round(float(row["irradiance_wm2"]) if pd.notna(row.get("irradiance_wm2")) else 0.0, 2),
+            "temp_c": round(float(row["temp_c"]) if pd.notna(row.get("temp_c")) else 0.0, 2),
+            "ac_power_w": round(float(row["ac_power_w"]) if pd.notna(row.get("ac_power_w")) else 0.0, 2),
+        })
+
+    failure_df = pd.DataFrame(failures)
+    print("\n" + "=" * 80)
+    print(f"TOP {top_n} WORST PREDICTION FAILURES (TEST SET)")
+    print("=" * 80)
+    print(failure_df.to_string(index=False))
+    print("=" * 80)
+
+    return failure_df
+
+
+def run_explainability_analysis(train_df, test_df, model=None):
+    """Run complete explainability workflow: Permutation Importance, PDP, and Failure Cases."""
+    print("\n" + "=" * 60)
+    print("STAGE 11 / TASK 7: MODEL EXPLAINABILITY & ERROR ANALYSIS")
+    print("=" * 60)
+
+    train_df = prepare_mlp_data(train_df)
+    test_df = prepare_mlp_data(test_df)
+
+    X_train, y_reg_train, _, features = get_clean_features(train_df)
+    X_test, y_reg_test, _, _ = get_clean_features(test_df)
+
+    if model is None:
+        print("\nTraining tuned MLP Regressor for explainability analysis...")
+        model = build_mlp_regressor()
+        model.fit(X_train, y_reg_train)
+
+    # 1. Permutation Importance
+    plot_permutation_importance(model, X_test, y_reg_test, features)
+
+    # 2. Partial Dependence Plots
+    plot_partial_dependence(model, X_train)
+
+    # 3. Top 3 Failure Cases
+    failure_df = get_top_failure_cases(model, test_df, X_test, y_reg_test, top_n=3)
+
+    return model, failure_df
+
+
+# ===========================================================================
+# 7. Main Execution Script
 # ===========================================================================
 
 if __name__ == "__main__":
@@ -486,7 +634,7 @@ if __name__ == "__main__":
     # 2. Unseen stations split
     _, unseen_split = split_unseen_stations(dataset)
 
-    # 3. Check if user passed --tune argument
+    # 3. Check CLI arguments
     if "--tune" in sys.argv:
         print("\nMode: Running Stage 10 Hyperparameter Tuning...")
         run_tuning_experiment(
@@ -494,6 +642,12 @@ if __name__ == "__main__":
             val_df=val_split,
             test_df=test_split,
             unseen_df=unseen_split,
+        )
+    elif "--explain" in sys.argv:
+        print("\nMode: Running Task 7 Model Explainability & Error Analysis...")
+        run_explainability_analysis(
+            train_df=train_split,
+            test_df=test_split,
         )
     else:
         print("\nMode: Running Stage 9 Baseline Models...")
@@ -507,3 +661,4 @@ if __name__ == "__main__":
     print("\n" + "=" * 60)
     print("Execution Finished! Results logged to results/results.csv")
     print("=" * 60)
+
