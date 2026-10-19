@@ -258,7 +258,7 @@ solar-health/
 ### Week 2: Features, Baseline Run & Framework Freeze
 * [x] Write cyclic time features (`hour_sin`, `hour_cos`, `day_sin`, `day_cos`) and metadata encoders in `src/features.py`.
 * [ ] Freeze `src/evaluate.py` so all teammates can test their Week 2 models.
-* [ ] Build first untuned MLP baseline with `StandardScaler` on a 10% sample; verify pipeline runs without errors.
+* [x] Build first untuned MLP baseline with `StandardScaler`; verify pipeline runs without errors.
 
 ### Week 3: Tuning, Anomaly Testing & Explainability
 * [ ] Run `RandomizedSearchCV` on MLP using `TimeSeriesSplit` on the sample; select best hyperparameters.
