@@ -3,3 +3,7 @@ timestamp,student,model,task,train_score,val_score,test_score,unseen_score,notes
 2026-10-19 14:46,B2,MLPClassifier,classification,F1: 0.97,F1: 0.97,F1: 0.94,F1: 0.92,"Dedicated Softmax classifier across Healthy, Warning, Faulty"
 2026-10-19 15:01,B2,MLPRegressor,regression,RMSE: 2.09,RMSE: 3.54,RMSE: 5.70,RMSE: 7.96,"Trained in 63.1s, (64, 32) hidden layers, Adam, ReLU"
 2026-10-19 15:01,B2,MLPClassifier,classification,F1: 0.97,F1: 0.97,F1: 0.94,F1: 0.92,"Trained in 39.5s, Dedicated Softmax across Healthy, Warning, Faulty"
+2026-10-19 15:42,B2,MLPRegressor (Tuned),regression,-,RMSE: 3.45,RMSE: 4.76,RMSE: 5.04,"Tuned: hidden=(100, 50), lr=0.005, alpha=0.0001"
+2026-10-19 15:42,B2,MLPRegressor,regression,RMSE: 2.09,RMSE: 3.54,RMSE: 5.70,RMSE: 7.96,"Trained in 70.4s, (64, 32) hidden layers, Adam, ReLU"
+2026-10-19 15:47,B2,MLPRegressor,regression,RMSE: 2.15,RMSE: 3.45,RMSE: 4.76,RMSE: 5.04,"Trained in 37.2s, (64, 32) hidden layers, Adam, ReLU"
+2026-10-19 15:47,B2,MLPClassifier,classification,F1: 0.96,F1: 0.96,F1: 0.96,F1: 0.95,"Trained in 23.9s, Dedicated Softmax across Healthy, Warning, Faulty"

@@ -261,8 +261,8 @@ solar-health/
 * [x] Build first untuned MLP baseline with `StandardScaler`; verify pipeline runs without errors.
 
 ### Week 3: Tuning, Anomaly Testing & Explainability
-* [ ] Run `RandomizedSearchCV` on MLP using `TimeSeriesSplit` on the sample; select best hyperparameters.
-* [ ] Refit best MLP on full training dataset; compute test scores on 2023 test set and unseen-station set.
+* [x] Run `GridSearchCV` on MLP using `TimeSeriesSplit` on the sample; select best hyperparameters.
+* [x] Refit best MLP on full training dataset; compute test scores on 2023 test set and unseen-station set.
 * [ ] Work with B1: Run `IsolationForest` on GPVS-Faults and compute fault detection recall/precision.
 * [ ] Generate Permutation Importance rankings and Partial Dependence Plots for the MLP.
 * [ ] Identify 3 specific failure cases (worst errors).
