@@ -10,9 +10,9 @@
 | 5 | Balancing | To do | To do (lead): imbalance study | To do | To do |
 | 6 | EDA | Done: power vs. irradiance; gap heatmap (`notebooks/01_eda_A1.ipynb`) | To do: temperature; correlation | To do: degradation; underperformers | Done: seasonality; class distribution (`notebooks/01_eda_B2.ipynb`) |
 | 7 | Features | To do: outage features | To do: lag & rolling | To do (lead): PR, deviations, target | Done: time + metadata (`src/features.py`) |
-| 8 | Baselines | To do (lead): persistence, Ridge, majority, rule, Logistic | — | — | — |
-| 9 | Model | To do: linear | To do: Random Forest | To do: XGBoost | Done: MLP (`src/models/mlp.py`) |
-| 10 | Tuning | To do: GridSearch | To do: RandomizedSearch | To do: Optuna | Done: GridSearchCV (`src/models/mlp.py`) |
+| 8 | Baselines | Done (lead): persistence, Ridge, majority, rule, Logistic (`src/models/linear.py`); re-run after target fix | — | — | — |
+| 9 | Model | Done: Ridge + Logistic (same file) | To do: Random Forest | To do: XGBoost | Done: MLP (`src/models/mlp.py`) |
+| 10 | Tuning | Done: GridSearch + TimeSeriesSplit; permutation importance left | To do: RandomizedSearch | To do: Optuna | Done: GridSearchCV (`src/models/mlp.py`) |
 | 11 | Evaluation | To do | To do | To do | Done (lead): splits, evaluate.py, fault injection, logger |
 | — | Isolation Forest | To do: HKUST injected faults | To do: HKUST injected faults | To do: GPVS-Faults | In progress: GPVS loader in evaluate.py |
 | 12 | Impact & limitations | — | — | — | To do (lead) |
