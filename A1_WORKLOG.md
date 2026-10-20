@@ -73,17 +73,45 @@
   - The 06:00 hour is 28% missing (inverters asleep); other hours are 3.8%.
   - Several outages hit all inverters at a station at once (Library, S H Ho, Zone J1 + A7), which points to communication failures.
 
+**Stage 8: Baselines + Track T1 linear models** (Done, branch `a1/baselines`) ([src/models/linear.py](src/models/linear.py), [notebooks/03_baselines_A1.ipynb](notebooks/03_baselines_A1.ipynb))
+- Target: B1's health score in forecasting mode (Option A): Health(t + 1 h) from data at t. The lead is taken on the full grid and kept only if exactly 1 hour later, never overnight. Rows need Health defined at both t and t+1h (B1's 100 W/m² rule).
+- Rows: train 270,448 / val 190,158 / test 464,676 (35,860 before and 428,816 after 2023-02-14) / unseen inverters 46,980. Unseen inverters are excluded from train and val.
+- Features (16): `health_now`, `n_valid_5min`, irradiance, temperature, RH, wind speed, and B2's time and metadata features. Mean-imputation and StandardScaler are fitted on train only.
+- Tuning: GridSearchCV over a 5-fold TimeSeriesSplit. Ridge alpha = 1000 (an interior optimum after widening the grid). Logistic macro-F1 is flat for C >= 1.
+- Results:
+
+  | Model | Val | Test | Test before / after 14 Feb | Unseen |
+  |---|---|---|---|---|
+  | Persistence (RMSE) | 12.92 | 16.56 | 10.88 / 16.95 | 17.14 |
+  | Ridge (RMSE) | 11.88 | 17.38 | 11.22 / 17.79 | 15.99 |
+  | Majority (macro-F1) | 0.29 | 0.10 | 0.30 / 0.07 | 0.10 |
+  | Rule: status of Health(t) (macro-F1) | 0.63 | 0.65 | 0.69 / 0.58 | 0.54 |
+  | Logistic (macro-F1) | 0.62 | 0.55 | 0.68 / 0.49 | 0.42 |
+
+- Findings:
+  - Ridge beats persistence on train and val but not on test.
+  - Every model holds up until 2023-02-14 and degrades after it, because B1's labels inherit the irradiance sensor change (52% of post-change rows are labelled Faulty, against 7% in train).
+  - The rule baseline is the strongest classifier.
+  - Ridge is dominated by `health_now` (13.6) and `n_valid_5min` (6.2).
+- Outputs: `reports/tables/a1_baseline_results.csv`, `a1_ridge_coefficients.csv`, `a1_logistic_coefficients.csv`, `reports/figures/a1_baselines_by_split.png`, and 5 rows in `results/results.csv`.
+- Re-run with `python -m src.models.linear` (add `--log` to append to `results.csv`) once B1 fixes the target.
+
 ## Open issues
 - Licence: the README says "N/A". Confirm CC0 and the published citation on the Dryad page.
 - Tilt is empty for UG Hall4 and Hall7 (`"0/15deg"`, `"0/11deg"`). Azimuth is `"Mixed"` for several stations.
-- Capacity looks wrong for Indoor Sports Centre (43.8 kWp on a 10 kW inverter) and Zone D Inverter 1 (station total on a 33.3 kW inverter). To be checked against actual max AC power.
-- Tell B2: the data starts mid-2021, not Jan 2021, and the unseen-station set is about 7 of 37.
+- Zone D capacities are inconsistent with the data (see EDA). Indoor Sports Centre's capacity is fine.
+- **For B1:** the health score uses raw irradiance, so the 2023-02-14 sensor change pushes 52% of post-change rows into Faulty. `create_forecasting_target` shifts by row, which can jump overnight on daylight-filtered data. Missing power is filled with 0, so outages score health 0.
+- **For B2:**
+  - `sq14_inverter` is in the unseen list but is not one of the 44 inverters.
+  - Zone A2 Inverters 2 and 3 are held out while Inverter 1 of the same station is in training.
+  - The MLP uses `ac_power_w`, `irradiance_wm2` and `capacity_kwp` to predict Health(t), which is computed from those same values (§7.2 leakage), and it scores night rows.
+  - `orient_south` and `orient_east_west` are constant 0 for every inverter.
 
 ## To do (A1)
 - [ ] Share `hkust_15min_v1.parquet` with the team (Drive/OneDrive)
 - [ ] Tell the team about the irradiance sensor change and the Zone D capacities (see EDA)
 - [ ] Features: `is_offline`, minutes offline in the last 24 h
-- [ ] Baselines: persistence, Ridge; majority, rule-based, Logistic
-- [ ] GridSearch tuning; coefficients + permutation importance
+- [ ] Re-run baselines once B1 fixes the target; add the peer-deviation rule once B1 builds that feature
+- [ ] Permutation importance for Ridge / Logistic; default-vs-tuned table
 - [ ] Isolation Forest on HKUST with injected faults (with A2)
 - [ ] Reproducibility section of the report
