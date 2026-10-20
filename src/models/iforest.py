@@ -20,6 +20,8 @@ import time
 from pathlib import Path
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
 from sklearn.ensemble import IsolationForest
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -111,11 +113,70 @@ def evaluate_anomalies(y_true, raw_predictions):
     }
 
 
+def plot_gpvs_anomaly_results(y_test, raw_preds, scores, metrics, save_path=None):
+    """Plot anomaly score distributions and confusion matrix for GPVS-Faults benchmark."""
+    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
+
+    y_true = np.array(y_test).astype(int)
+    
+    # 1. Left subplot: Anomaly Score Distribution (decision function)
+    normal_scores = scores[y_true == 0]
+    fault_scores = scores[y_true == 1]
+
+    sns.kdeplot(normal_scores, ax=axes[0], fill=True, color="#2ecc71", label=f"Healthy (n={len(normal_scores)})", alpha=0.4, linewidth=2)
+    sns.kdeplot(fault_scores, ax=axes[0], fill=True, color="#e74c3c", label=f"Ground Truth Fault (n={len(fault_scores)})", alpha=0.4, linewidth=2)
+    axes[0].axvline(0.0, color="#2c3e50", linestyle="--", linewidth=1.8, label="Decision Threshold (0.0)")
+    axes[0].set_title("Isolation Forest Decision Score Distribution", fontsize=12, fontweight="bold", pad=10)
+    axes[0].set_xlabel("Decision Function Score (Negative = Anomaly)", fontsize=10)
+    axes[0].set_ylabel("Density", fontsize=10)
+    axes[0].grid(True, linestyle=":", alpha=0.6)
+    axes[0].legend(loc="upper left", frameon=True)
+
+    # 2. Right subplot: Confusion Matrix
+    cm = metrics["confusion_matrix"]
+    group_names = ["True Negative", "False Positive\n(False Alarm)", "False Negative\n(Missed Fault)", "True Positive\n(Detected Fault)"]
+    group_counts = [f"{value:d}" for value in cm.flatten()]
+    group_percentages = [f"{value:.1%}" for value in cm.flatten() / np.sum(cm)]
+    labels = [f"{v1}\n{v2}\n({v3})" for v1, v2, v3 in zip(group_names, group_counts, group_percentages)]
+    labels = np.asarray(labels).reshape(2, 2)
+
+    sns.heatmap(
+        cm,
+        annot=labels,
+        fmt="",
+        cmap="Blues",
+        cbar=False,
+        ax=axes[1],
+        xticklabels=["Predicted Normal", "Predicted Fault"],
+        yticklabels=["Actual Normal", "Actual Fault"],
+        annot_kws={"fontsize": 10, "weight": "medium"}
+    )
+    axes[1].set_title(
+        f"GPVS-Faults Confusion Matrix\nRecall (TPR): {metrics['recall']:.1%} | Precision: {metrics['precision']:.1%} | F1: {metrics['f1']:.3f}",
+        fontsize=11,
+        fontweight="bold",
+        pad=10
+    )
+    axes[1].set_ylabel("True Ground Truth", fontsize=10)
+    axes[1].set_xlabel("Isolation Forest Prediction", fontsize=10)
+
+    plt.suptitle("Stage 9 / Track T5: Unsupervised Anomaly Detection (Pair B: GPVS-Faults)", fontsize=13, fontweight="bold", y=1.02)
+    plt.tight_layout()
+
+    if save_path:
+        save_path = Path(save_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        print(f"GPVS anomaly detection plot saved to: {save_path}")
+
+    plt.close(fig)
+
+
 # ===========================================================================
 # 3. Task 5: GPVS-Faults Real Fault Benchmark (Pair B Core Task)
 # ===========================================================================
 
-def run_gpvs_experiment(test_size=0.25, random_state=42):
+def run_gpvs_experiment(test_size=0.25, random_state=42, save_plot=True):
     """Train Isolation Forest and evaluate on the GPVS-Faults real benchmark."""
     print("\n" + "=" * 65)
     print("TASK 5: UNSUPERVISED ANOMALY DETECTION ON GPVS-FAULTS (REAL FAULTS)")
@@ -178,9 +239,14 @@ def run_gpvs_experiment(test_size=0.25, random_state=42):
     print(f" [FN={metrics['fn']}, TP={metrics['tp']}]]")
     print("-" * 50)
 
-    # 6. Log to results/results.csv
+    # 6. Save visualization plot
+    if save_plot:
+        plot_path = ROOT / "reports" / "figures" / "b1_iforest_gpvs_detection.png"
+        plot_gpvs_anomaly_results(y_test, raw_preds, scores, metrics, save_path=plot_path)
+
+    # 7. Log to results/results.csv
     log_experiment(
-        student="B2",
+        student="B1/B2",
         model_name="IsolationForest (GPVS-Faults)",
         task="anomaly_detection",
         train_score="-",

@@ -14,6 +14,6 @@
 | 9 | Model | Done: Ridge + Logistic (same file) | To do: Random Forest | Done: XGBoost (`src/models/xgb.py`, `notebooks/03_xgb_B1.ipynb`) | Done: MLP (`src/models/mlp.py`) |
 | 10 | Tuning | Done: GridSearch + TimeSeriesSplit, default vs tuned, permutation importance, failure cases | To do: RandomizedSearch | Done: B2 Splits GridSearch, early stopping, default vs tuned | Done: GridSearchCV (`src/models/mlp.py`) |
 | 11 | Evaluation | To do | To do | Done: test 2023, unseen stations, Tree-SHAP, failures (`src/models/xgb.py`) | Done (lead): splits, evaluate.py, fault injection, logger |
-| — | Isolation Forest | To do: HKUST injected faults | To do: HKUST injected faults | To do: GPVS-Faults | In progress: GPVS loader in evaluate.py |
+| — | Isolation Forest | To do: HKUST injected faults | To do: HKUST injected faults | Done: GPVS-Faults verification & plot (`src/models/iforest.py`) | Done: GPVS loader & evaluation in `evaluate.py` |
 | 12 | Impact & limitations | — | — | — | To do (lead) |
-| — | Write-up | Draft: reproducibility (`reports/reproducibility.md`) | Started: preprocessing decisions and leakage checks (`reports/A2_PREPROCESSING.md`); project-wide audit pending | Done: feature/target justification (`reports/Section_07_Features.md`) | To do: AI-usage log |
+| — | Write-up | Draft: reproducibility (`reports/reproducibility.md`) | Started: preprocessing decisions and leakage checks (`reports/A2_PREPROCESSING.md`); project-wide audit pending | Done: §7 (`reports/Section_07_Features.md`), §9-11 (`reports/Section_09_10_XGBoost.md`), Viva prep (`reports/B1_VIVA_PREP.md`) | To do: AI-usage log |
