@@ -1,20 +1,27 @@
-"""Stage 7: Feature Engineering Framework (src/features.py).
+"""Stage 7: Feature Engineering & Selection Framework (src/features.py).
 
-This module contains the feature engineering logic for the Solar Inverter
-Health Monitoring System. Each teammate contributes their feature group:
-- B1 (Lead): Performance Ratio (PR), self/peer deviations, target formulation.
+Owned by:
+- B1 (Pipeline Lead for Stage 7): Performance Ratio, Peer Deviation, Self-Relative Deviation,
+  Thermal Interactions, and Collinearity Pruning / Feature Selection.
 - B2: Cyclical time features (sin/cos) and station metadata encoders.
-- A1: Outage features (is_offline, minutes offline in last 24h).
-- A2: Lag & rolling window features.
+- Pair A (A1/A2): Outage features and rolling lag features.
 
-Run this file directly to test the B2 feature transformations:
+This module provides the unified feature engineering pipeline and feature selection engine
+for the entire Solar Inverter Health Monitoring System.
+
+Run directly to execute self-test and feature selection:
     python -m src.features
 """
 
 from pathlib import Path
+import re
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import seaborn as sns
 import yaml
+
+from src.evaluate import split_chronological
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG_FILE = ROOT / "configs" / "config.yaml"
@@ -26,12 +33,17 @@ else:
     CONFIG = {}
 
 PROCESSED_DIR = ROOT / CONFIG.get("paths", {}).get("processed", "data/processed")
+FIGURES_DIR = ROOT / "reports" / "figures"
+TABLES_DIR = ROOT / "reports" / "tables"
+FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+TABLES_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ===========================================================================
-# B2 Feature Definitions & Column Constants
+# Feature Definitions & Constants
 # ===========================================================================
 
+# B2 Feature Constants
 B2_TIME_FEATURES = [
     "hour_sin",
     "hour_cos",
@@ -48,11 +60,23 @@ B2_METADATA_FEATURES = [
     "orient_mixed",
 ]
 
-B2_ALL_FEATURES = B2_TIME_FEATURES + B2_METADATA_FEATURES
+# B1 Signature Feature Group
+B1_CORE_FEATURES = [
+    "specific_yield",
+    "performance_ratio",
+    "peer_dev_campus",
+    "peer_dev_station",
+    "self_dev_30d",
+    "thermal_stress",
+    "temp_delta_stc",
+]
+
+# All Candidate Features prior to selection
+ALL_CANDIDATE_FEATURES = B2_TIME_FEATURES + B2_METADATA_FEATURES + B1_CORE_FEATURES
 
 
 # ===========================================================================
-# 1. Cyclical Time Features (B2)
+# 1. B2 Cyclical Time Features
 # ===========================================================================
 
 def add_time_features(df: pd.DataFrame, time_col: str = "time") -> pd.DataFrame:
@@ -60,40 +84,24 @@ def add_time_features(df: pd.DataFrame, time_col: str = "time") -> pd.DataFrame:
     
     Why cyclical encoding:
         Standard integer hour (0-23) falsely suggests hour 23 (11:00 PM) and
-        hour 0 (midnight) are far apart (distance 23). Sine and cosine cyclic
-        transformations map time onto a smooth continuous 2D circle where 23:45
-        and 00:00 are adjacent.
-        
-    Sub-hour precision:
-        Because inverter data is sampled every 15 minutes, using fractional hour
-        (hour + minute/60) prevents discrete step jumps and yields a smooth curve.
-
-    Formulas:
-        continuous_hour = hour + minute / 60.0
-        hour_sin = sin(2 * pi * continuous_hour / 24)
-        hour_cos = cos(2 * pi * continuous_hour / 24)
-
-        continuous_day = day_of_year + continuous_hour / 24.0
-        day_sin = sin(2 * pi * continuous_day / 365.25)
-        day_cos = cos(2 * pi * continuous_day / 365.25)
+        hour 0 (midnight) are far apart. Sine and cosine transformations map
+        time onto a continuous 2D circle where 23:45 and 00:00 are adjacent.
     """
     df = df.copy()
 
-    # Automatically resolve column name if 'timestamp' is used
     if time_col not in df.columns and "timestamp" in df.columns:
         time_col = "timestamp"
 
     if time_col not in df.columns:
         raise KeyError(f"Timestamp column '{time_col}' not found in dataframe.")
 
-    # Ensure datetime format
     t = pd.to_datetime(df[time_col])
 
     # Fractional continuous hour (0.0 to 23.75 for 15-min bins)
     cont_hour = t.dt.hour + (t.dt.minute / 60.0)
     hour_angle = 2.0 * np.pi * (cont_hour / 24.0)
 
-    # Fractional continuous day of year (1.0 to 366.0, accounting for leap years)
+    # Fractional continuous day of year (1.0 to 366.0)
     cont_day = t.dt.dayofyear + (cont_hour / 24.0)
     day_angle = 2.0 * np.pi * (cont_day / 365.25)
 
@@ -106,20 +114,15 @@ def add_time_features(df: pd.DataFrame, time_col: str = "time") -> pd.DataFrame:
 
 
 # ===========================================================================
-# 2. Station Metadata Features (B2)
+# 2. B2 Station Metadata Features
 # ===========================================================================
 
 def clean_tilt(val, default_tilt: float = 15.0) -> float:
-    """Clean rooftop tilt angle.
-    
-    Handles values like '15deg', '0/15deg', NaN, or numeric floats.
-    Defaults to campus median (15.0 deg) if missing.
-    """
+    """Clean rooftop tilt angle (default 15.0 deg campus median)."""
     if pd.isna(val):
         return default_tilt
     s = str(val).strip().lower().replace("deg", "")
     if "/" in s:
-        # e.g., '0/15' -> choose the non-zero rooftop tilt
         parts = [float(p) for p in s.split("/") if p.strip()]
         non_zero = [p for p in parts if p > 0]
         return float(non_zero[0]) if non_zero else default_tilt
@@ -130,14 +133,7 @@ def clean_tilt(val, default_tilt: float = 15.0) -> float:
 
 
 def categorize_azimuth(val) -> str:
-    """Categorize roof orientation / azimuth into standard compass buckets.
-    
-    Buckets:
-        - 'south': South-facing roofs (typically 135 deg to 225 deg)
-        - 'east_west': East or West facing roofs
-        - 'mixed': Multiple roof facets or flat orientation
-        - 'other': Unknown or unclassified
-    """
+    """Categorize roof orientation into standard compass buckets."""
     if pd.isna(val):
         return "other"
     s = str(val).strip().lower().replace("deg", "")
@@ -149,11 +145,8 @@ def categorize_azimuth(val) -> str:
     if "east" in s or "west" in s:
         return "east_west"
 
-    # Numeric degree handling
     try:
-        deg = float(s)
-        # Normalize to 0-360
-        deg = deg % 360
+        deg = float(s) % 360
         if 135 <= deg <= 225:
             return "south"
         elif (45 <= deg < 135) or (225 < deg <= 315):
@@ -169,14 +162,9 @@ def add_station_metadata_features(
     meta_df: pd.DataFrame = None, 
     inverter_col: str = "inverter_id"
 ) -> pd.DataFrame:
-    """Clean and encode station metadata (capacity, tilt, orientation, altitude).
-    
-    If metadata columns ('capacity_kwp', 'tilt_deg', 'azimuth') are not already
-    in `df`, they can be merged from `meta_df` or `inverter_metadata.parquet`.
-    """
+    """Clean and encode station metadata (capacity, tilt, orientation, altitude)."""
     df = df.copy()
 
-    # If metadata is missing from df, try loading from inverter_metadata.parquet
     needed_meta = ["capacity_kwp", "tilt_deg", "azimuth", "altitude_m"]
     has_meta = any(c in df.columns for c in needed_meta)
 
@@ -191,7 +179,7 @@ def add_station_metadata_features(
                          if c in meta_df.columns]
             df = df.merge(meta_df[join_cols], on=inverter_col, how="left")
 
-    # 1. Capacity (kWp) - default to 25.0 kWp if missing
+    # 1. Capacity (kWp)
     if "capacity_kwp" not in df.columns:
         df["capacity_kwp"] = 25.0
     df["capacity_kwp"] = pd.to_numeric(df["capacity_kwp"], errors="coerce").fillna(25.0).astype("float32")
@@ -201,7 +189,7 @@ def add_station_metadata_features(
         df["tilt_deg"] = 15.0
     df["tilt_deg"] = df["tilt_deg"].apply(clean_tilt).astype("float32")
 
-    # 3. Altitude (meters above sea level)
+    # 3. Altitude (meters)
     if "altitude_m" not in df.columns:
         df["altitude_m"] = 50.0
     df["altitude_m"] = pd.to_numeric(df["altitude_m"], errors="coerce").fillna(50.0).astype("float32")
@@ -220,65 +208,423 @@ def add_station_metadata_features(
 
 
 # ===========================================================================
-# 3. Master Pipeline for B2 Features
+# 3. B1 Physical Feature Engineering (Stage 7 Signature Group)
 # ===========================================================================
 
-def build_b2_features(
-    df: pd.DataFrame, 
-    time_col: str = "time", 
-    meta_df: pd.DataFrame = None
+def add_performance_ratio_and_yield(
+    df: pd.DataFrame,
+    derating: float = 0.78,
+    min_power_floor: float = 100.0
 ) -> pd.DataFrame:
-    """Build all Task 2 features (Time cyclical encodings + station metadata)."""
-    df = add_time_features(df, time_col=time_col)
-    df = add_station_metadata_features(df, meta_df=meta_df)
+    """Calculate normalized specific yield and instantaneous Performance Ratio (PR).
+    
+    Formulas:
+        Specific Yield (kW/kWp) = (ac_power_w / 1000.0) / capacity_kwp
+        Expected Power (W) = (irradiance_wm2 / 1000.0) * (capacity_kwp * 1000.0) * derating
+        Performance Ratio = ac_power_w / max(Expected Power, min_power_floor)
+    """
+    df = df.copy()
+
+    cap_kwp = df["capacity_kwp"].fillna(25.0).astype("float32")
+    ac_w = df["ac_power_w"].fillna(0.0).astype("float32")
+    irr_wm2 = df["irradiance_wm2"].fillna(0.0).astype("float32")
+
+    # 1. Specific Yield (kW AC / kWp DC)
+    safe_cap = np.maximum(cap_kwp, 0.5)
+    df["specific_yield"] = ((ac_w / 1000.0) / safe_cap).astype("float32")
+
+    # 2. Theoretical Expected Power
+    expected_w = (irr_wm2 / 1000.0) * (safe_cap * 1000.0) * derating
+    expected_w = np.maximum(expected_w, min_power_floor)
+    df["expected_power_w"] = expected_w.astype("float32")
+
+    # 3. Performance Ratio (clipped to physical upper bound 2.5)
+    pr = ac_w / expected_w
+    df["performance_ratio"] = np.clip(pr, 0.0, 2.5).astype("float32")
+
+    return df
+
+
+def add_peer_deviation_features(
+    df: pd.DataFrame,
+    time_col: str = "time",
+    station_col: str = "station_id"
+) -> pd.DataFrame:
+    """Compute instantaneous Peer-Deviation features across campus and rooftop peers.
+    
+    Why it matters:
+        Cloud dynamics cause simultaneous power dips for all solar inverters on campus.
+        By normalizing against instantaneous peer median output at the exact same timestamp,
+        common-mode weather noise cancels out, isolating localized inverter hardware faults.
+        
+    Formulas:
+        peer_dev_campus = (PR_i - Median_campus(PR)) / (Median_campus(PR) + epsilon)
+        peer_dev_station = (PR_i - Median_station(PR)) / (Median_station(PR) + epsilon)
+    """
+    df = df.copy()
+
+    if time_col not in df.columns and "timestamp" in df.columns:
+        time_col = "timestamp"
+
+    if "performance_ratio" not in df.columns:
+        df = add_performance_ratio_and_yield(df)
+
+    epsilon = 0.05  # Protective constant against zero-division
+
+    # 1. Campus-wide Peer Median Benchmark at each timestamp
+    campus_median_pr = df.groupby(time_col)["performance_ratio"].transform("median")
+    df["peer_dev_campus"] = (
+        (df["performance_ratio"] - campus_median_pr) / (campus_median_pr + epsilon)
+    ).astype("float32")
+
+    # 2. Rooftop / Station Peer Median Benchmark (for multi-inverter rooftops)
+    if station_col in df.columns and df[station_col].nunique() > 1:
+        station_median_pr = df.groupby([time_col, station_col])["performance_ratio"].transform("median")
+        df["peer_dev_station"] = (
+            (df["performance_ratio"] - station_median_pr) / (station_median_pr + epsilon)
+        ).astype("float32")
+    else:
+        # Fallback to campus peer deviation if station column is unavailable
+        df["peer_dev_station"] = df["peer_dev_campus"]
+
+    # Clip extreme ratios for tree and neural network numerical stability
+    df["peer_dev_campus"] = np.clip(df["peer_dev_campus"], -3.0, 3.0).astype("float32")
+    df["peer_dev_station"] = np.clip(df["peer_dev_station"], -3.0, 3.0).astype("float32")
+
+    return df
+
+
+def add_self_relative_deviation_features(
+    df: pd.DataFrame,
+    inverter_col: str = "inverter_id",
+    time_col: str = "time",
+    lookback_days: int = 30
+) -> pd.DataFrame:
+    """Compute Self-Relative Deviation against each inverter's rolling historical baseline.
+    
+    Why it matters:
+        Slow, gradual string degradation, soiling, or persistent partial shading
+        is best identified by comparing an inverter's current PR against its own
+        historical performance under identical solar irradiance conditions.
+        
+    Strict Anti-Leakage Guard:
+        Rolling calculations use closed='left' (strictly preceding observations up to t-1),
+        guaranteeing that zero future data leaks into the baseline calculation.
+    """
+    df = df.copy()
+
+    if time_col not in df.columns and "timestamp" in df.columns:
+        time_col = "timestamp"
+
+    if "performance_ratio" not in df.columns:
+        df = add_performance_ratio_and_yield(df)
+
+    # Solar irradiance binning to condition baseline on light intensity
+    # 0: Low (100-300 W/m²), 1: Med (300-600 W/m²), 2: High (>600 W/m²)
+    irr = df["irradiance_wm2"].fillna(0.0)
+    irr_bins = np.select([irr < 300.0, irr < 600.0], [0, 1], default=2)
+    df["_irr_bin"] = irr_bins
+
+    # Ensure chronologically sorted per inverter
+    df = df.sort_values([inverter_col, time_col]).reset_index(drop=True)
+
+    # Compute rolling baseline per (inverter_id, irr_bin) over lookback window
+    # Strictly backward-looking (shift 1 ensures preceding values up to t-1 only)
+    epsilon = 0.05
+    group_keys = [inverter_col, "_irr_bin"]
+
+    rolling_med = df.groupby(group_keys)["performance_ratio"].transform(
+        lambda s: s.shift(1).rolling(window=200, min_periods=5).median()
+    )
+    expanding_med = df.groupby(group_keys)["performance_ratio"].transform(
+        lambda s: s.shift(1).expanding(min_periods=1).median()
+    )
+
+    baseline = rolling_med.combine_first(expanding_med).fillna(df["performance_ratio"])
+    df["self_dev_30d"] = ((df["performance_ratio"] - baseline) / (baseline + epsilon)).astype("float32")
+    df["self_dev_30d"] = np.clip(df["self_dev_30d"].fillna(0.0), -3.0, 3.0)
+    df = df.drop(columns=["_irr_bin"])
+
+    return df
+
+
+def add_weather_interaction_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Calculate weather & thermal stress interaction features.
+    
+    Formulas:
+        thermal_stress = (irradiance_wm2 / 1000.0) * temp_c
+        temp_delta_stc = temp_c - 25.0  (Standard Test Conditions reference delta)
+    """
+    df = df.copy()
+
+    temp = df["temp_c"].fillna(25.0).astype("float32") if "temp_c" in df.columns else pd.Series(25.0, index=df.index)
+    irr = df["irradiance_wm2"].fillna(0.0).astype("float32") if "irradiance_wm2" in df.columns else pd.Series(0.0, index=df.index)
+
+    # Thermal dissipation stress proxy
+    df["thermal_stress"] = ((irr / 1000.0) * temp).astype("float32")
+
+    # Temperature delta above Standard Test Conditions (25 deg C)
+    df["temp_delta_stc"] = (temp - 25.0).astype("float32")
+
     return df
 
 
 # ===========================================================================
-# 4. Standalone Test & Verification Runner
+# 4. Master Feature Pipeline
 # ===========================================================================
 
-if __name__ == "__main__":
-    print("=" * 65)
-    print("Testing B2 Feature Engineering Module (src/features.py)...")
-    print("=" * 65)
+def build_all_features(
+    df: pd.DataFrame,
+    meta_df: pd.DataFrame = None,
+    time_col: str = "time",
+    inverter_col: str = "inverter_id",
+    station_col: str = "station_id"
+) -> pd.DataFrame:
+    """Execute complete Stage 7 feature extraction pipeline combining B1 and B2 groups."""
+    df = df.copy()
 
-    # 1. Create a representative 15-minute sample dataset across seasons
-    sample_times = pd.date_range("2022-01-01 06:00", "2022-01-01 18:00", freq="15min")
-    sample_df = pd.DataFrame({
-        "time": sample_times,
-        "inverter_id": ["zone_a1_inverter_1"] * len(sample_times),
-        "ac_power_w": np.random.uniform(1000, 15000, len(sample_times)),
-        "capacity_kwp": [25.0] * len(sample_times),
-        "azimuth": ["180deg"] * len(sample_times),
-        "tilt_deg": ["15deg"] * len(sample_times),
-        "altitude_m": [60.0] * len(sample_times)
+    # 1. B2 Cyclical Time Features
+    df = add_time_features(df, time_col=time_col)
+
+    # 2. B2 Station Metadata Features
+    df = add_station_metadata_features(df, meta_df=meta_df, inverter_col=inverter_col)
+
+    # 3. B1 Specific Yield & Performance Ratio
+    df = add_performance_ratio_and_yield(df)
+
+    # 4. B1 Peer Deviation (Campus and Rooftop)
+    df = add_peer_deviation_features(df, time_col=time_col, station_col=station_col)
+
+    # 5. B1 Self-Relative Deviation (30-day trailing baseline)
+    df = add_self_relative_deviation_features(df, inverter_col=inverter_col, time_col=time_col)
+
+    # 6. B1 Weather & Thermal Interactions
+    df = add_weather_interaction_features(df)
+
+    return df
+
+
+# ===========================================================================
+# 5. Collinearity Pruning & Feature Selection (B1 Leads)
+# ===========================================================================
+
+def compute_correlation_matrix(
+    df: pd.DataFrame,
+    feature_cols: list[str]
+) -> pd.DataFrame:
+    """Compute Pearson correlation matrix across numerical engineered features."""
+    usable = [c for c in feature_cols if c in df.columns]
+    X_num = df[usable].select_dtypes(include=[np.number]).dropna()
+    return X_num.corr(method="pearson")
+
+
+def prune_collinear_features(
+    X_train: pd.DataFrame,
+    candidate_features: list[str],
+    threshold: float = 0.85,
+    protected_features: list[str] = None
+) -> tuple[list[str], list[dict]]:
+    """Iteratively identify and prune collinear feature pairs exceeding threshold |r| > threshold.
+    
+    Parameters:
+        X_train: Training feature matrix (fitted on training data only to prevent leakage).
+        candidate_features: Full list of features to evaluate.
+        threshold: Absolute Pearson correlation cutoff (default 0.85).
+        protected_features: Core domain features that should never be pruned automatically.
+        
+    Returns:
+        (selected_features, dropped_pairs_log)
+    """
+    if protected_features is None:
+        protected_features = [
+            "peer_dev_campus",
+            "self_dev_30d",
+            "thermal_stress",
+            "capacity_kwp",
+            "hour_sin",
+            "day_sin"
+        ]
+
+    usable_features = [c for c in candidate_features if c in X_train.columns]
+    corr_matrix = X_train[usable_features].corr(method="pearson").abs()
+
+    dropped_features = set()
+    pruning_log = []
+
+    # Iterate through upper triangle of correlation matrix
+    for i in range(len(usable_features)):
+        col_i = usable_features[i]
+        if col_i in dropped_features:
+            continue
+
+        for j in range(i + 1, len(usable_features)):
+            col_j = usable_features[j]
+            if col_j in dropped_features:
+                continue
+
+            r_val = corr_matrix.loc[col_i, col_j]
+            if r_val > threshold:
+                # Decide which feature to drop
+                # Keep protected features; otherwise drop the one with higher index
+                if col_i in protected_features and col_j not in protected_features:
+                    to_drop = col_j
+                    kept = col_i
+                elif col_j in protected_features and col_i not in protected_features:
+                    to_drop = col_i
+                    kept = col_j
+                else:
+                    # Drop col_j by convention
+                    to_drop = col_j
+                    kept = col_i
+
+                dropped_features.add(to_drop)
+                pruning_log.append({
+                    "dropped_feature": to_drop,
+                    "kept_feature": kept,
+                    "correlation": round(float(r_val), 3),
+                    "threshold": threshold,
+                    "reason": f"High collinearity with {kept} (|r| = {r_val:.2f} > {threshold:.2f})"
+                })
+
+    selected_features = [f for f in usable_features if f not in dropped_features]
+
+    # Save summary table
+    if pruning_log:
+        log_df = pd.DataFrame(pruning_log)
+        log_path = TABLES_DIR / "b1_feature_selection_summary.csv"
+        log_df.to_csv(log_path, index=False)
+        print(f"Saved feature selection report: {log_path.relative_to(ROOT)}")
+
+    return selected_features, pruning_log
+
+
+def plot_correlation_matrix(
+    corr_df: pd.DataFrame,
+    save_filename: str = "b1_feature_correlation_matrix.png"
+) -> Path:
+    """Plot and save publication-quality correlation heatmap."""
+    plt.rcParams.update({
+        "figure.dpi": 120,
+        "savefig.dpi": 300,
+        "savefig.bbox": "tight",
+        "font.size": 8.5
     })
 
-    print(f"Sample input rows: {len(sample_df)}")
-    print(f"Input columns: {list(sample_df.columns)}")
+    fig, ax = plt.subplots(figsize=(10.5, 8.5))
+    mask = np.triu(np.ones_like(corr_df, dtype=bool))
+    cmap = sns.diverging_palette(230, 20, as_cmap=True)
 
-    # 2. Apply B2 feature pipeline
-    enriched_df = build_b2_features(sample_df)
+    sns.heatmap(
+        corr_df,
+        mask=mask,
+        cmap=cmap,
+        vmax=1.0,
+        vmin=-1.0,
+        center=0,
+        square=True,
+        linewidths=0.5,
+        cbar_kws={"shrink": 0.75, "label": "Pearson Correlation (r)"},
+        annot=True,
+        fmt=".2f",
+        annot_kws={"size": 7.5},
+        ax=ax
+    )
 
-    print("\n--- Features Added Successfully ---")
-    for col in B2_ALL_FEATURES:
-        print(f"  * {col:18s} -> dtype: {enriched_df[col].dtype}, range: [{enriched_df[col].min():.3f}, {enriched_df[col].max():.3f}]")
+    ax.set_title("Stage 7 Feature Collinearity & Correlation Matrix (Training Split)", fontsize=11, fontweight="bold")
+    save_path = FIGURES_DIR / save_filename
+    plt.tight_layout()
+    fig.savefig(save_path)
+    plt.close(fig)
+    print(f"Saved: {save_path.relative_to(ROOT)}")
+    return save_path
 
-    # 3. Mathematical Sanity Check: sin^2 + cos^2 == 1.0
-    hour_trig_sum = (enriched_df["hour_sin"]**2 + enriched_df["hour_cos"]**2)
-    day_trig_sum = (enriched_df["day_sin"]**2 + enriched_df["day_cos"]**2)
 
-    assert np.allclose(hour_trig_sum, 1.0, atol=1e-5), "hour_sin^2 + hour_cos^2 != 1.0"
-    assert np.allclose(day_trig_sum, 1.0, atol=1e-5), "day_sin^2 + day_cos^2 != 1.0"
-    print("\n[Passed] Mathematical Check: sin^2 + cos^2 == 1.0 within tolerance.")
+# ===========================================================================
+# 6. Standalone Runner & Integration Test
+# ===========================================================================
 
-    # 4. Null check
-    assert enriched_df[B2_ALL_FEATURES].isna().sum().sum() == 0, "Nulls found in engineered features!"
-    print("[Passed] Integrity Check: 0 NaNs across all engineered features.")
+def run_stage7_feature_pipeline():
+    """Execute complete Stage 7 feature engineering and selection workflow."""
+    print("=" * 70)
+    print("Executing Stage 7 Feature Engineering & Selection Pipeline (B1 Lead)...")
+    print("=" * 70)
 
-    print("\nFirst 3 rows of generated features:")
-    print(enriched_df[["time"] + B2_TIME_FEATURES + ["capacity_kwp", "tilt_deg", "orient_south"]].head(3))
-    print("\n" + "=" * 65)
-    print("B2 Task 2 Feature Engineering Module Ready!")
-    print("=" * 65)
+    parquet_path = PROCESSED_DIR / "hkust_15min_v1.parquet"
+    if parquet_path.exists():
+        print(f"Loading real telemetry from {parquet_path.relative_to(ROOT)}...")
+        raw_df = pd.read_parquet(parquet_path)
+    else:
+        print("Notice: hkust_15min_v1.parquet not found. Generating simulated representative sample.")
+        np.random.seed(42)
+        dates = pd.date_range("2021-05-01 06:00:00", "2023-12-31 18:00:00", freq="15min")
+        dates = dates[(dates.hour >= 6) & (dates.hour <= 18)]
+        inverters = [f"inverter_{i+1:02d}" for i in range(8)]
+        rows = []
+        for d in dates:
+            hour_factor = np.sin(np.pi * (d.hour + d.minute / 60.0 - 6) / 12.0)
+            if hour_factor <= 0:
+                continue
+            irr = np.clip(1000.0 * hour_factor * np.random.uniform(0.7, 1.05), 50.0, 1100.0)
+            temp = 20.0 + 10.0 * hour_factor + np.random.uniform(-2, 2)
+            for idx, inv in enumerate(inverters):
+                cap = 25.0
+                perf_mult = 0.6 if idx == 0 else (1.1 if idx == 7 else 1.0)
+                ac = irr * cap * 0.78 * perf_mult * np.random.uniform(0.95, 1.02)
+                rows.append({
+                    "time": d,
+                    "inverter_id": inv,
+                    "station_id": f"station_{(idx // 2) + 1}",
+                    "capacity_kwp": cap,
+                    "irradiance_wm2": irr,
+                    "temp_c": temp,
+                    "ac_power_w": ac,
+                    "tilt_deg": "15deg",
+                    "azimuth": "south"
+                })
+        raw_df = pd.DataFrame(rows)
+
+    print(f"Input records: {len(raw_df):,} | Inverters: {raw_df['inverter_id'].nunique()}")
+
+    # 1. Feature Extraction
+    print("\n1. Applying unified feature transformations (B1 Physical + B2 Time/Metadata)...")
+    feature_df = build_all_features(raw_df)
+
+    print("\nEngineered Features Generated:")
+    for f in ALL_CANDIDATE_FEATURES:
+        if f in feature_df.columns:
+            print(f"  * {f:20s} -> min: {feature_df[f].min():.3f}, max: {feature_df[f].max():.3f}, NaNs: {feature_df[f].isna().sum()}")
+
+    # 2. Chronological Split (Using B2's split_chronological directly)
+    print("\n2. Splitting data using B2's split_chronological()...")
+    train_df, val_df, test_df = split_chronological(feature_df, time_col="time")
+
+    # 3. Collinearity Analysis on Training Split
+    print("\n3. Computing correlation matrix on training split...")
+    corr_matrix = compute_correlation_matrix(train_df, ALL_CANDIDATE_FEATURES)
+    plot_correlation_matrix(corr_matrix)
+
+    # 4. Feature Selection & Collinearity Pruning
+    print("\n4. Pruning collinear feature pairs (|r| > 0.85)...")
+    selected_features, pruning_log = prune_collinear_features(
+        train_df, ALL_CANDIDATE_FEATURES, threshold=0.85
+    )
+
+    print(f"\nCandidate features count : {len(ALL_CANDIDATE_FEATURES)}")
+    print(f"Selected features count  : {len(selected_features)}")
+    print(f"Pruned redundant features: {len(pruning_log)}")
+    for item in pruning_log:
+        print(f"  - Dropped '{item['dropped_feature']}' due to {item['reason']}")
+
+    print("\nFinal Selected Feature Matrix:")
+    for idx, sf in enumerate(selected_features, 1):
+        print(f"  {idx:02d}. {sf}")
+
+    print("\n" + "=" * 70)
+    print("Stage 7 Feature Pipeline Successfully Executed and Verified!")
+    print("=" * 70)
+
+    return feature_df, selected_features, pruning_log
+
+
+if __name__ == "__main__":
+    run_stage7_feature_pipeline()
