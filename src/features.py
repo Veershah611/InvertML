@@ -75,6 +75,23 @@ B1_CORE_FEATURES = [
 # All Candidate Features prior to selection
 ALL_CANDIDATE_FEATURES = B2_ALL_FEATURES + B1_CORE_FEATURES
 
+# Stage 7 Pruned & Selected Final 13 Features
+STAGE_7_SELECTED_FEATURES = [
+    "hour_sin",
+    "day_sin",
+    "day_cos",
+    "capacity_kwp",
+    "tilt_deg",
+    "altitude_m",
+    "orient_south",
+    "orient_east_west",
+    "orient_mixed",
+    "peer_dev_campus",
+    "peer_dev_station",
+    "self_dev_30d",
+    "thermal_stress",
+]
+
 
 # ===========================================================================
 # 1. B2 Cyclical Time Features
