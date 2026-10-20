@@ -1,0 +1,17 @@
+,Ridge,Logistic Regression
+health_now,13.6823,0.2656
+n_valid_5min,3.1668,0.0039
+altitude_m,0.1227,0.0137
+hour_sin,0.0982,0.0161
+day_cos,0.0978,0.04
+orient_mixed,0.0416,0.0345
+temp_c,0.023,0.0325
+rh_pct,0.0112,0.0043
+irradiance_wm2,0.0056,0.009
+day_sin,0.0022,0.0026
+hour_cos,0.0011,-0.0014
+orient_south,0.0,0.0
+orient_east_west,0.0,0.0
+tilt_deg,-0.0001,0.0334
+wind_speed_ms,-0.0001,0.0044
+capacity_kwp,-0.0002,0.0144

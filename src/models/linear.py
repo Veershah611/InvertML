@@ -23,6 +23,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from sklearn.dummy import DummyClassifier
+from sklearn.inspection import permutation_importance
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
 from sklearn.pipeline import Pipeline
@@ -123,6 +124,61 @@ def fit_logistic(X, y):
     return search
 
 
+def default_vs_tuned(X_train, train, X, y_reg, y_cls, ridge, logit):
+    """Same pipelines with sklearn's default hyperparameters (alpha=1, C=1)
+    against the tuned ones, scored on validation and test."""
+    defaults = {
+        "Ridge": (Pipeline([("scaler", StandardScaler()), ("model", Ridge(alpha=1.0))])
+                  .fit(X_train, train["health_lead"]), ridge.best_estimator_),
+        "Logistic Regression": (Pipeline([("scaler", StandardScaler()),
+                                          ("model", LogisticRegression(class_weight="balanced",
+                                                                       max_iter=2000, random_state=SEED))])
+                                .fit(X_train, train["status_lead"]), logit.best_estimator_),
+    }
+    rows = []
+    for model, (default, tuned) in defaults.items():
+        for version, est in [("default", default), ("tuned", tuned)]:
+            row = {"model": model, "version": version,
+                   "params": str(est.named_steps["model"].get_params()["alpha" if model == "Ridge" else "C"])}
+            for name in ["val", "test"]:
+                pred = est.predict(X[name])
+                if model == "Ridge":
+                    row[f"{name}_rmse"] = evaluate_regression(y_reg[name], pred)["rmse"]
+                else:
+                    m = evaluate_classification(y_cls[name], pred)
+                    row[f"{name}_macro_f1"] = m["macro_f1"]
+                    row[f"{name}_faulty_recall"] = m["faulty_recall"]
+            rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def permutation_importances(ridge, logit, X_val, y_reg_val, y_cls_val, n=20000):
+    """Permutation importance on a validation sample: how much the score drops
+    when one feature is shuffled (RMSE for Ridge, macro-F1 for Logistic)."""
+    idx = np.random.RandomState(SEED).choice(len(X_val), size=min(n, len(X_val)), replace=False)
+    Xs = X_val.iloc[idx]
+    out = {}
+    for model, est, y, scoring in [("Ridge", ridge.best_estimator_, y_reg_val[idx], "neg_root_mean_squared_error"),
+                                   ("Logistic Regression", logit.best_estimator_, y_cls_val[idx], "f1_macro")]:
+        r = permutation_importance(est, Xs, y, scoring=scoring, n_repeats=5,
+                                   random_state=SEED, n_jobs=-1)
+        out[model] = r.importances_mean
+    imp = pd.DataFrame(out, index=FEATURES)
+    return imp.sort_values("Ridge", ascending=False).round(4)
+
+
+def failure_cases(part, ridge, X_part, n=3):
+    """The n largest Ridge errors in a split, with the context needed to explain them."""
+    pred = ridge.predict(X_part)
+    cases = part.assign(predicted=pred, abs_error=np.abs(part["health_lead"] - pred))
+    cols = ["inverter_id", "time", "health_now", "health_lead", "predicted", "abs_error",
+            "irradiance_wm2", "n_valid_5min", "temp_c"]
+    worst = cases.nlargest(n, "abs_error")[cols].reset_index(drop=True)
+    numeric = worst.select_dtypes("number").columns
+    worst[numeric] = worst[numeric].round(2)
+    return worst
+
+
 def coefficients(search, classes=None):
     """Coefficients on the standardised scale, so magnitudes are comparable."""
     model = search.best_estimator_.named_steps["model"]
@@ -185,10 +241,18 @@ def run(log=False):
     coef_ridge.to_csv(TABLES / "a1_ridge_coefficients.csv")
     coef_logit.to_csv(TABLES / "a1_logistic_coefficients.csv")
 
+    tuning = default_vs_tuned(X_train, train, X, y_reg, y_cls, ridge, logit)
+    tuning.to_csv(TABLES / "a1_default_vs_tuned.csv", index=False)
+    importance = permutation_importances(ridge, logit, X["val"], y_reg["val"], y_cls["val"])
+    importance.to_csv(TABLES / "a1_permutation_importance.csv")
+    failures = {name: failure_cases(parts[name], ridge, X[name]) for name in ["val", "test"]}
+    pd.concat(failures, names=["split"]).to_csv(TABLES / "a1_failure_cases.csv")
+
     if log:
         log_results(results, ridge, logit)
     return {"data": data, "parts": parts, "results": results, "ridge": ridge,
-            "logit": logit, "coef_ridge": coef_ridge, "coef_logit": coef_logit}
+            "logit": logit, "coef_ridge": coef_ridge, "coef_logit": coef_logit,
+            "tuning": tuning, "importance": importance, "failures": failures}
 
 
 def log_results(results, ridge, logit):
