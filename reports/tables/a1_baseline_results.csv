@@ -1,0 +1,31 @@
+task,model,split,n,mae,rmse,r2,macro_f1,faulty_recall,faulty_precision
+regression,Persistence,train,270448,4.95,12.135,0.692,,,
+regression,Persistence,val,190158,6.108,12.924,0.718,,,
+regression,Persistence,test,464676,11.02,16.563,0.545,,,
+regression,Persistence,test_before_14feb,35860,4.227,10.878,0.789,,,
+regression,Persistence,test_after_14feb,428816,11.588,16.952,0.487,,,
+regression,Persistence,test_unseen,46980,11.542,17.139,0.441,,,
+regression,Ridge,train,270448,5.667,10.836,0.755,,,
+regression,Ridge,val,190158,6.684,11.875,0.762,,,
+regression,Ridge,test,464676,12.948,17.376,0.5,,,
+regression,Ridge,test_before_14feb,35860,6.179,11.218,0.775,,,
+regression,Ridge,test_after_14feb,428816,13.514,17.794,0.435,,,
+regression,Ridge,test_unseen,46980,11.189,15.995,0.513,,,
+classification,Majority class,train,270448,,,,0.301,0.0,0.0
+classification,Majority class,val,190158,,,,0.2893,0.0,0.0
+classification,Majority class,test,464676,,,,0.0988,0.0,0.0
+classification,Majority class,test_before_14feb,35860,,,,0.2965,0.0,0.0
+classification,Majority class,test_after_14feb,428816,,,,0.0723,0.0,0.0
+classification,Majority class,test_unseen,46980,,,,0.0974,0.0,0.0
+classification,Rule: status of Health(t),train,270448,,,,0.6154,0.6802,0.6426
+classification,Rule: status of Health(t),val,190158,,,,0.629,0.7403,0.6519
+classification,Rule: status of Health(t),test,464676,,,,0.6492,0.7684,0.7266
+classification,Rule: status of Health(t),test_before_14feb,35860,,,,0.6855,0.774,0.755
+classification,Rule: status of Health(t),test_after_14feb,428816,,,,0.5849,0.7683,0.7261
+classification,Rule: status of Health(t),test_unseen,46980,,,,0.5428,0.6442,0.5773
+classification,Logistic Regression,train,270448,,,,0.607,0.6759,0.711
+classification,Logistic Regression,val,190158,,,,0.6228,0.73,0.6869
+classification,Logistic Regression,test,464676,,,,0.5491,0.7082,0.6214
+classification,Logistic Regression,test_before_14feb,35860,,,,0.6771,0.7504,0.7942
+classification,Logistic Regression,test_after_14feb,428816,,,,0.4859,0.7073,0.6186
+classification,Logistic Regression,test_unseen,46980,,,,0.4155,0.6068,0.3996
