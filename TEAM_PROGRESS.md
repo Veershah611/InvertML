@@ -4,7 +4,7 @@
 |---|---|---|---|---|---|
 | 0 | Repo setup | Done: skeleton, config.yaml, venv, requirements | To do | To do | To do |
 | 1 | Problem definition | Done: §1 of the assignment doc (lead) | — | — | — |
-| 2 | Data acquisition | In progress: column table and findings done; licence check left | — | — | To do: GPVS-Faults loader |
+| 2 | Data acquisition | Done: column table, findings, licence (CC0) | — | — | To do: GPVS-Faults loader |
 | 3 | Data preparation | Done (lead): metadata, Parquet, 15-min resample, merge, gap analysis, before/after table. To do: share `hkust_15min_v1.parquet` | — | — | — |
 | 4 | Preprocessing | — | To do (lead) | — | — |
 | 5 | Balancing | To do | To do (lead): imbalance study | To do | To do |
@@ -12,8 +12,8 @@
 | 7 | Features | To do: outage features | To do: lag & rolling | To do (lead): PR, deviations, target | Done: time + metadata (`src/features.py`) |
 | 8 | Baselines | Done (lead): persistence, Ridge, majority, rule, Logistic (`src/models/linear.py`); re-run after target fix | — | — | — |
 | 9 | Model | Done: Ridge + Logistic (same file) | To do: Random Forest | To do: XGBoost | Done: MLP (`src/models/mlp.py`) |
-| 10 | Tuning | Done: GridSearch + TimeSeriesSplit; permutation importance left | To do: RandomizedSearch | To do: Optuna | Done: GridSearchCV (`src/models/mlp.py`) |
+| 10 | Tuning | Done: GridSearch + TimeSeriesSplit, default vs tuned, permutation importance, failure cases | To do: RandomizedSearch | To do: Optuna | Done: GridSearchCV (`src/models/mlp.py`) |
 | 11 | Evaluation | To do | To do | To do | Done (lead): splits, evaluate.py, fault injection, logger |
 | — | Isolation Forest | To do: HKUST injected faults | To do: HKUST injected faults | To do: GPVS-Faults | In progress: GPVS loader in evaluate.py |
 | 12 | Impact & limitations | — | — | — | To do (lead) |
-| — | Write-up | To do: reproducibility | To do: leakage audit | To do: feature/target justification | To do: AI-usage log |
+| — | Write-up | Draft: reproducibility (`reports/reproducibility.md`) | To do: leakage audit | To do: feature/target justification | To do: AI-usage log |

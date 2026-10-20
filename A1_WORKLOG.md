@@ -7,7 +7,7 @@
 - `configs/config.yaml`: paths, seed 42, timezone, 15-min frequency, 70% coverage threshold, split dates.
 - Python 3.12 `.venv`; `requirements.txt` pins the 9 top-level packages.
 
-**Stage 2: Data understanding** (Done, except the licence)
+**Stage 2: Data understanding** (Done)
 - Inspected the dataset README and every file. Column table and findings written into §2.1 of the assignment doc.
 - **Scope decision:** inverter-level data only, meaning 44 inverters at 37 stations, resampled 5-min → 15-min. The 23 stations without optimizers have only hourly site-level data and are excluded.
 - Missing from the dataset: DC current/power and module temperature. The conditional features in §7.1 are therefore not possible.
@@ -93,11 +93,24 @@
   - Every model holds up until 2023-02-14 and degrades after it, because B1's labels inherit the irradiance sensor change (52% of post-change rows are labelled Faulty, against 7% in train).
   - The rule baseline is the strongest classifier.
   - Ridge is dominated by `health_now` (13.6) and `n_valid_5min` (6.2).
-- Outputs: `reports/tables/a1_baseline_results.csv`, `a1_ridge_coefficients.csv`, `a1_logistic_coefficients.csv`, `reports/figures/a1_baselines_by_split.png`, and 5 rows in `results/results.csv`.
+- Default vs tuned: almost no difference (Ridge val RMSE 11.86 default vs 11.88 tuned; Logistic identical). A linear model on 270k rows has little variance to regularise.
+- Permutation importance (validation sample of 20k): `health_now` (+13.7 RMSE for Ridge, -0.27 macro-F1 for Logistic), then `n_valid_5min` (+3.2 RMSE). Every other feature is below 0.13 RMSE.
+- Failure cases: all 6 worst Ridge errors are **outage onsets** (health 100 at t, 0 at t+1h). They include Zone J2 2022-08-03 (its 36-day outage) and Zone A7 2023-05-04, both also found in the EDA. They are unpredictable from data at t. Health is 0 there because B1's target fills missing power with 0.
+- Outputs:
+  - `reports/tables/a1_baseline_results.csv`, `a1_ridge_coefficients.csv`, `a1_logistic_coefficients.csv`
+  - `a1_default_vs_tuned.csv`, `a1_permutation_importance.csv`, `a1_failure_cases.csv`
+  - `reports/figures/a1_baselines_by_split.png`
+  - 5 rows in `results/results.csv`
 - Re-run with `python -m src.models.linear` (add `--log` to append to `results.csv`) once B1 fixes the target.
 
+**Stage 2: Licence check** (Done)
+- Confirmed on the Dryad page: public domain (CC0). The paper is published: Scientific Data (2025), doi:10.1038/s41597-025-04397-y. The dataset README's "N/A" and "under review" are outdated. Recorded in §2.1 of the design doc and in the README.
+
+**Write-up: Reproducibility section** (Draft) ([reports/reproducibility.md](reports/reproducibility.md))
+- Covers environment, data sources and licences, pipeline commands in order with measured run times, seeds and config, leakage controls, results tracking, and caveats.
+- Rows for B1's and B2's entry points are marked "to be completed".
+
 ## Open issues
-- Licence: the README says "N/A". Confirm CC0 and the published citation on the Dryad page.
 - Tilt is empty for UG Hall4 and Hall7 (`"0/15deg"`, `"0/11deg"`). Azimuth is `"Mixed"` for several stations.
 - Zone D capacities are inconsistent with the data (see EDA). Indoor Sports Centre's capacity is fine.
 - **For B1:** the health score uses raw irradiance, so the 2023-02-14 sensor change pushes 52% of post-change rows into Faulty. `create_forecasting_target` shifts by row, which can jump overnight on daylight-filtered data. Missing power is filled with 0, so outages score health 0.
@@ -112,6 +125,5 @@
 - [ ] Tell the team about the irradiance sensor change and the Zone D capacities (see EDA)
 - [ ] Features: `is_offline`, minutes offline in the last 24 h
 - [ ] Re-run baselines once B1 fixes the target; add the peer-deviation rule once B1 builds that feature
-- [ ] Permutation importance for Ridge / Logistic; default-vs-tuned table
 - [ ] Isolation Forest on HKUST with injected faults (with A2)
-- [ ] Reproducibility section of the report
+- [ ] Finish the reproducibility section once B1 and B2 add their entry points

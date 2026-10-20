@@ -34,6 +34,7 @@ Everything runs on CPU-only laptops.
 
 ### 1. HKUST Rooftop PV, 2021-2023 (primary)
 - **Source:** Lin et al., *A high-resolution three-year dataset supporting rooftop photovoltaics (PV) generation analytics*, Scientific Data (2025). Dryad: https://doi.org/10.5061/dryad.m37pvmd99
+- **Licence:** public domain (CC0), per the Dryad page. Paper: https://doi.org/10.1038/s41597-025-04397-y
 - **Contents:**
   - 60 rooftop PV stations on the HKUST campus in Hong Kong.
   - Inverter-level generation every 5 minutes: AC power, per-phase AC current/voltage/frequency/power, and DC voltage.
@@ -103,6 +104,8 @@ Teammates who don't want to run this step can download the shared `hkust_15min_v
 
 ### 4. GPVS-Faults
 Download instructions and the loader will be added by B2.
+
+Full reproduction steps, seeds and run times: [reports/reproducibility.md](reports/reproducibility.md).
 
 ## Repository structure
 ```

@@ -59,7 +59,7 @@ Every stage is either implemented or explicitly marked "not applicable" with a r
 
 ### 2.1 Primary dataset: HKUST Rooftop PV (2021–2023)
 * **Source:** Lin et al., *A high-resolution three-year dataset supporting rooftop photovoltaics (PV) generation analytics*, Scientific Data (2025). Data on Dryad: https://doi.org/10.5061/dryad.m37pvmd99
-* **Ownership / licence:** Published on Dryad (Hong Kong University of Science and Technology). Dryad datasets are normally released under CC0. **Action (A1): confirm the licence on the Dryad page and record it in the report together with the paper citation.**
+* **Ownership / licence:** Published on Dryad by the Hong Kong University of Science and Technology team (published 2 Apr 2024, updated 8 Sep 2024). **Licence: public domain (CC0)**, confirmed on the Dryad page by A1. Paper: Lin et al., Scientific Data (2025), https://doi.org/10.1038/s41597-025-04397-y.
 * **Collection method:** 60 grid-connected rooftop PV stations on the HKUST campus. Inverter-level data every 5 minutes exists only for the 37 stations with panel-level optimizers; the other 23 have hourly site-level data only. Weather comes from **one on-site station every 1 minute**. Data was collected over Wi-Fi and RS232/RS485 loggers into a central database.
 * **Size:** about 296 MB zipped. Inverter-level files: **4,766,698 rows** across 44 CSVs (633 MB unzipped), about 1.6M rows after 15-min resampling.
 * **Metadata:** stored as a **Brick schema model (`.ttl`)**, queried with SPARQL (Python `rdflib`). It holds station specifications such as capacity and orientation.
@@ -93,7 +93,7 @@ The feature design (§7) works with **AC power + irradiance + ambient temperatur
 * Two timestamp formats are mixed across files (`2021-05-04 07:00:00` and `2021/5/1 6:00`). Weather files use the second format.
 * `Rainfall_2021` is `.xlsx`; the other years are `.csv`.
 * Site-level file quirks (not used, but noted): `Zone L1 (Station 1)` has a duplicate first timestamp and runs into 2024. `SQ14` starts in 2023 but has as many rows as files that start in 2021, so its start date is probably wrong.
-* Licence: the README says "Licenses: N/A", and its citation is still "under review". Confirm the licence and citation on the Dryad page.
+* Licence: the dataset README says "Licenses: N/A" and calls the paper "under review". Both are outdated: the Dryad page lists the licence as public domain (CC0), and the paper is published (see above).
 
 **Target variable.** None is provided. The health score and status labels are **engineered** (§7.2), and the report must say so plainly.
 

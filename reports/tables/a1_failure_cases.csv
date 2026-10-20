@@ -1,0 +1,7 @@
+split,,inverter_id,time,health_now,health_lead,predicted,abs_error,irradiance_wm2,n_valid_5min,temp_c
+val,0,sq_block_r_inverter,2022-08-12 08:30:00,100.0,0.0,101.41,101.41,114.12,3,25.45
+val,1,sq_block_s_inverter,2022-08-12 08:30:00,100.0,0.0,101.41,101.41,114.12,3,25.45
+val,2,zone_j2_inverter,2022-08-03 09:30:00,100.0,0.0,101.13,101.13,152.2,3,27.28
+test,0,zone_d_inverter_2,2023-06-25 09:00:00,100.0,0.0,101.51,101.51,902.99,3,30.22
+test,1,zone_a7_inverter,2023-05-04 12:30:00,100.0,0.0,101.03,101.03,787.33,3,27.76
+test,2,zone_a7_inverter,2023-05-04 12:45:00,100.0,0.0,101.01,101.01,783.71,3,27.33
