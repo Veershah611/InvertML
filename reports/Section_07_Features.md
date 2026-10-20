@@ -1,5 +1,13 @@
 # Section 7: Feature Engineering, Target Formulation & Feature Selection
 
+> Integration note: the implementation was updated after upstream commit
+> `876302c` to preserve the A1/B2 API, retain missing physical measurements,
+> use an actual trailing 30-day baseline, and respect protected features during
+> pruning. The historical selection tables/plots below describe B1's original
+> run and have not been regenerated with these corrections. A2's current
+> integration and validation results are documented in
+> [A2 preprocessing](A2_PREPROCESSING.md).
+
 **Stage 7 Lead:** Partner B1 (Feature Specialist & XGBoost Track Lead)  
 **Contributors:** Partner B2 (Cyclical Time & Station Metadata Features), Pair A (A1 Outage & A2 Rolling Lags)  
 **Assignment Reference:** Innovative Assignment Guidelines §2 (Stage 7) & [`Solar_Inverter_Health_Monitoring.md`](file:///Users/hettala/Downloads/ML%20ass/Solar_Inverter_Health_Monitoring.md)

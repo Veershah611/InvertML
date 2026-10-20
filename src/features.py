@@ -14,11 +14,9 @@ Run directly to execute self-test and feature selection:
 """
 
 from pathlib import Path
-import re
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import seaborn as sns
 import yaml
 
 from src.evaluate import split_chronological
@@ -60,6 +58,9 @@ B2_METADATA_FEATURES = [
     "orient_mixed",
 ]
 
+# Public API used by A1's baselines and B2's MLP/notebook.
+B2_ALL_FEATURES = B2_TIME_FEATURES + B2_METADATA_FEATURES
+
 # B1 Signature Feature Group
 B1_CORE_FEATURES = [
     "specific_yield",
@@ -72,7 +73,7 @@ B1_CORE_FEATURES = [
 ]
 
 # All Candidate Features prior to selection
-ALL_CANDIDATE_FEATURES = B2_TIME_FEATURES + B2_METADATA_FEATURES + B1_CORE_FEATURES
+ALL_CANDIDATE_FEATURES = B2_ALL_FEATURES + B1_CORE_FEATURES
 
 
 # ===========================================================================
@@ -225,22 +226,33 @@ def add_performance_ratio_and_yield(
     """
     df = df.copy()
 
-    cap_kwp = df["capacity_kwp"].fillna(25.0).astype("float32")
-    ac_w = df["ac_power_w"].fillna(0.0).astype("float32")
-    irr_wm2 = df["irradiance_wm2"].fillna(0.0).astype("float32")
+    cap_kwp = df["capacity_kwp"].astype("float32")
+    ac_w = df["ac_power_w"].astype("float32")
+    irr_wm2 = df["irradiance_wm2"].astype("float32")
+    valid_power = np.isfinite(ac_w) & ac_w.ge(0)
+    if "is_offline" in df:
+        valid_power &= ~df["is_offline"].fillna(True).astype(bool)
+    if "n_valid_5min" in df:
+        valid_power &= df["n_valid_5min"].gt(0)
 
     # 1. Specific Yield (kW AC / kWp DC)
-    safe_cap = np.maximum(cap_kwp, 0.5)
+    safe_cap = cap_kwp.where(np.isfinite(cap_kwp) & cap_kwp.gt(0))
+    ac_w = ac_w.where(valid_power)
     df["specific_yield"] = ((ac_w / 1000.0) / safe_cap).astype("float32")
 
     # 2. Theoretical Expected Power
+    irr_wm2 = irr_wm2.where(np.isfinite(irr_wm2) & irr_wm2.ge(0))
     expected_w = (irr_wm2 / 1000.0) * (safe_cap * 1000.0) * derating
     expected_w = np.maximum(expected_w, min_power_floor)
     df["expected_power_w"] = expected_w.astype("float32")
 
     # 3. Performance Ratio (clipped to physical upper bound 2.5)
     pr = ac_w / expected_w
-    df["performance_ratio"] = np.clip(pr, 0.0, 2.5).astype("float32")
+    # Match the daylight requirement used by B1's health labels. Missing
+    # telemetry stays missing and cannot depress the campus peer median.
+    df["performance_ratio"] = np.clip(pr, 0.0, 2.5).where(
+        irr_wm2 >= 100.0
+    ).astype("float32")
 
     return df
 
@@ -278,8 +290,10 @@ def add_peer_deviation_features(
     ).astype("float32")
 
     # 2. Rooftop / Station Peer Median Benchmark (for multi-inverter rooftops)
-    if station_col in df.columns and df[station_col].nunique() > 1:
-        station_median_pr = df.groupby([time_col, station_col])["performance_ratio"].transform("median")
+    if station_col in df.columns:
+        station_median_pr = df.groupby(
+            [time_col, station_col], observed=True
+        )["performance_ratio"].transform("median")
         df["peer_dev_station"] = (
             (df["performance_ratio"] - station_median_pr) / (station_median_pr + epsilon)
         ).astype("float32")
@@ -307,43 +321,45 @@ def add_self_relative_deviation_features(
         is best identified by comparing an inverter's current PR against its own
         historical performance under identical solar irradiance conditions.
         
-    Strict Anti-Leakage Guard:
-        Rolling calculations use closed='left' (strictly preceding observations up to t-1),
-        guaranteeing that zero future data leaks into the baseline calculation.
+    The baseline contains observed daylight PR in [t-lookback_days, t).
+    With no history in that window the deviation stays missing for a
+    training-fitted imputer. Input order and index are preserved.
     """
     df = df.copy()
 
     if time_col not in df.columns and "timestamp" in df.columns:
         time_col = "timestamp"
+    if not isinstance(lookback_days, int) or lookback_days <= 0:
+        raise ValueError("lookback_days must be a positive integer")
+    df[time_col] = pd.to_datetime(df[time_col])
+    if df[[inverter_col, time_col]].isna().any().any():
+        raise ValueError("Inverter ID and timestamp are required for rolling features")
+    if df.duplicated([inverter_col, time_col]).any():
+        raise ValueError("Duplicate inverter/timestamp rows in rolling features")
 
     if "performance_ratio" not in df.columns:
         df = add_performance_ratio_and_yield(df)
 
     # Solar irradiance binning to condition baseline on light intensity
     # 0: Low (100-300 W/m²), 1: Med (300-600 W/m²), 2: High (>600 W/m²)
-    irr = df["irradiance_wm2"].fillna(0.0)
+    irr = df["irradiance_wm2"]
     irr_bins = np.select([irr < 300.0, irr < 600.0], [0, 1], default=2)
-    df["_irr_bin"] = irr_bins
-
-    # Ensure chronologically sorted per inverter
-    df = df.sort_values([inverter_col, time_col]).reset_index(drop=True)
-
-    # Compute rolling baseline per (inverter_id, irr_bin) over lookback window
-    # Strictly backward-looking (shift 1 ensures preceding values up to t-1 only)
+    work = df[[inverter_col, time_col, "performance_ratio"]].copy()
+    work["_irr_bin"] = irr_bins
+    work["_position"] = np.arange(len(work))
+    work.loc[~irr.ge(100), "performance_ratio"] = np.nan
+    work = work.sort_values([inverter_col, time_col])
     epsilon = 0.05
-    group_keys = [inverter_col, "_irr_bin"]
-
-    rolling_med = df.groupby(group_keys)["performance_ratio"].transform(
-        lambda s: s.shift(1).rolling(window=200, min_periods=5).median()
-    )
-    expanding_med = df.groupby(group_keys)["performance_ratio"].transform(
-        lambda s: s.shift(1).expanding(min_periods=1).median()
-    )
-
-    baseline = rolling_med.combine_first(expanding_med).fillna(df["performance_ratio"])
+    baselines = np.full(len(df), np.nan)
+    for _, group in work.groupby([inverter_col, "_irr_bin"], observed=True):
+        history = group.set_index(time_col)["performance_ratio"]
+        median = history.rolling(
+            f"{lookback_days}D", min_periods=1, closed="left"
+        ).median()
+        baselines[group["_position"].to_numpy()] = median.to_numpy()
+    baseline = pd.Series(baselines, index=df.index)
     df["self_dev_30d"] = ((df["performance_ratio"] - baseline) / (baseline + epsilon)).astype("float32")
-    df["self_dev_30d"] = np.clip(df["self_dev_30d"].fillna(0.0), -3.0, 3.0)
-    df = df.drop(columns=["_irr_bin"])
+    df["self_dev_30d"] = np.clip(df["self_dev_30d"], -3.0, 3.0).where(irr.ge(100))
 
     return df
 
@@ -357,8 +373,8 @@ def add_weather_interaction_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     df = df.copy()
 
-    temp = df["temp_c"].fillna(25.0).astype("float32") if "temp_c" in df.columns else pd.Series(25.0, index=df.index)
-    irr = df["irradiance_wm2"].fillna(0.0).astype("float32") if "irradiance_wm2" in df.columns else pd.Series(0.0, index=df.index)
+    temp = df["temp_c"].astype("float32") if "temp_c" in df.columns else pd.Series(np.nan, index=df.index)
+    irr = df["irradiance_wm2"].astype("float32") if "irradiance_wm2" in df.columns else pd.Series(np.nan, index=df.index)
 
     # Thermal dissipation stress proxy
     df["thermal_stress"] = ((irr / 1000.0) * temp).astype("float32")
@@ -372,6 +388,23 @@ def add_weather_interaction_features(df: pd.DataFrame) -> pd.DataFrame:
 # ===========================================================================
 # 4. Master Feature Pipeline
 # ===========================================================================
+
+def build_b2_features(df, time_col="time", meta_df=None):
+    """Compatibility entry point for the existing A1 and B2 model families."""
+    return add_station_metadata_features(
+        add_time_features(df, time_col=time_col), meta_df=meta_df
+    )
+
+
+def build_b1_features(df, time_col="time", inverter_col="inverter_id",
+                      station_col="station_id"):
+    """Physical features without replacing metadata or missing measurements."""
+    df = add_performance_ratio_and_yield(df)
+    df = add_peer_deviation_features(df, time_col=time_col, station_col=station_col)
+    df = add_self_relative_deviation_features(df, inverter_col=inverter_col,
+                                             time_col=time_col)
+    return add_weather_interaction_features(df)
+
 
 def build_all_features(
     df: pd.DataFrame,
@@ -389,19 +422,8 @@ def build_all_features(
     # 2. B2 Station Metadata Features
     df = add_station_metadata_features(df, meta_df=meta_df, inverter_col=inverter_col)
 
-    # 3. B1 Specific Yield & Performance Ratio
-    df = add_performance_ratio_and_yield(df)
-
-    # 4. B1 Peer Deviation (Campus and Rooftop)
-    df = add_peer_deviation_features(df, time_col=time_col, station_col=station_col)
-
-    # 5. B1 Self-Relative Deviation (30-day trailing baseline)
-    df = add_self_relative_deviation_features(df, inverter_col=inverter_col, time_col=time_col)
-
-    # 6. B1 Weather & Thermal Interactions
-    df = add_weather_interaction_features(df)
-
-    return df
+    return build_b1_features(df, time_col=time_col, inverter_col=inverter_col,
+                             station_col=station_col)
 
 
 # ===========================================================================
@@ -422,7 +444,8 @@ def prune_collinear_features(
     X_train: pd.DataFrame,
     candidate_features: list[str],
     threshold: float = 0.85,
-    protected_features: list[str] = None
+    protected_features: list[str] = None,
+    save_report: bool = True,
 ) -> tuple[list[str], list[dict]]:
     """Iteratively identify and prune collinear feature pairs exceeding threshold |r| > threshold.
     
@@ -464,6 +487,8 @@ def prune_collinear_features(
 
             r_val = corr_matrix.loc[col_i, col_j]
             if r_val > threshold:
+                if col_i in protected_features and col_j in protected_features:
+                    continue
                 # Decide which feature to drop
                 # Keep protected features; otherwise drop the one with higher index
                 if col_i in protected_features and col_j not in protected_features:
@@ -485,11 +510,14 @@ def prune_collinear_features(
                     "threshold": threshold,
                     "reason": f"High collinearity with {kept} (|r| = {r_val:.2f} > {threshold:.2f})"
                 })
+                # Once col_i is removed it cannot justify dropping more columns.
+                if to_drop == col_i:
+                    break
 
     selected_features = [f for f in usable_features if f not in dropped_features]
 
     # Save summary table
-    if pruning_log:
+    if pruning_log and save_report:
         log_df = pd.DataFrame(pruning_log)
         log_path = TABLES_DIR / "b1_feature_selection_summary.csv"
         log_df.to_csv(log_path, index=False)
@@ -503,6 +531,7 @@ def plot_correlation_matrix(
     save_filename: str = "b1_feature_correlation_matrix.png"
 ) -> Path:
     """Plot and save publication-quality correlation heatmap."""
+    import seaborn as sns
     plt.rcParams.update({
         "figure.dpi": 120,
         "savefig.dpi": 300,

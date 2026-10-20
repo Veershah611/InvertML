@@ -1,0 +1,8 @@
+stage,rows,columns
+input,1588901,45
+is_offline,94441,58
+invalid_capacity,0,58
+invalid_power,3209,58
+invalid_irradiance,218,58
+invalid_weather_count,0,58
+eligible_daylight,1270728,58
