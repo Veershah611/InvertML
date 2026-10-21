@@ -106,12 +106,96 @@
 **Stage 2: Licence check** (Done)
 - Confirmed on the Dryad page: public domain (CC0). The paper is published: Scientific Data (2025), doi:10.1038/s41597-025-04397-y. The dataset README's "N/A" and "under review" are outdated. Recorded in §2.1 of the design doc and in the README.
 
+**Stage 3: Tilt fix** (Done, branch `a1/tilt-fix`) ([src/prepare_data.py](src/prepare_data.py))
+- Two-value tilts become their midpoint: UG Hall4 `"0/15deg"` → 7.5, UG Hall7 `"0/11deg"` → 5.5.
+- Tilts recorded only as `"Mixed"` become 5.0, the midpoint of the campus 0-10° range. These are 11 inverters without data files, so the processed data is not affected today.
+- New column `tilt_mixed` (1 for all of these). `hkust_15min_v1.parquet` is now 1,588,901 × 46 with 0 NaN tilts.
+- Before this, `clean_tilt()` in `features.py` turned the NaN tilts into 15.
+
+**Stage 7: Outage features** (Done, branch `a1/outage-features`) ([src/features.py](src/features.py) `add_a1_outage_features`, [tests/test_a1_outage.py](tests/test_a1_outage.py))
+- `is_offline`: A2's rule (AC power missing or `n_valid_5min == 0`).
+- `minutes_offline_24h`: 15 × offline bins in [t − 24 h, t), excluding t, counting only bins with irradiance ≥ 50 W/m² (`daylight_irradiance_wm2`).
+- The daylight rule is needed because inverters asleep at dawn are offline by A2's rule. Without it, 43% of train rows showed offline minutes; with it, 6.5%.
+- Must run on the full grid before any filtering or split.
+- Validation effect when added to the 16 linear features:
+
+  | Features | Ridge RMSE | Ridge MAE | Logistic macro-F1 | Faulty recall |
+  |---|---|---|---|---|
+  | Baseline 16 | 11.875 | 6.684 | 0.6228 | 0.7300 |
+  | + outage | 11.858 | 6.666 | 0.6225 | 0.7304 |
+
+- The gain is negligible: `health_now` already scores offline bins as 0. The features stay available for the tree models.
+
+**Stage 5: Balancing for Logistic Regression** (Done, branch `a1/balancing`) ([src/models/linear_balancing.py](src/models/linear_balancing.py))
+- Compared `class_weight="balanced"` against Healthy undersampling (A2's rule: 2 Healthy rows per non-Healthy row, train only).
+- C was re-tuned for each strategy over a 5-fold TimeSeriesSplit, with undersampling applied inside each training fold only. SMOTE was rejected because it would invent readings between rows from different days and inverters.
+
+  | Strategy | C | Train rows | Val macro-F1 | Faulty recall | Faulty precision | Faulty PR-AUC |
+  |---|---|---|---|---|---|---|
+  | **class_weight (selected)** | 1000 | 270,448 | **0.623** | **0.730** | 0.687 | 0.795 |
+  | undersampling | 10 | 143,502 | 0.589 | 0.730 | 0.712 | 0.801 |
+
+- Faulty recall is tied, and class weights win on macro-F1. Undersampling loses most Warning predictions (1,630 correct against 8,508).
+- Regression (not balanced): the share of Faulty Health(t+1h) labels is 9.8% in train, 12.8% in val and 47.9% in test (the sensor change).
+- Ridge validation error by score range:
+  - Faulty: MAE 20.1, mean error +19.5
+  - Warning: MAE 10.8
+  - Healthy: MAE 3.9, mean error −3.4
+  - Ridge shrinks predictions toward the mean, so it over-predicts low scores.
+- Outputs: `a1_balancing.csv`, `a1_balancing_cv.csv`, `a1_target_distribution.csv`, `a1_ridge_error_by_range.csv`
+
+**Stage 11: Evaluation of Track T1** (Done, branch `a1/evaluation`) ([src/models/linear_evaluation.py](src/models/linear_evaluation.py))
+- Uses the same target, features, splits and tuning as `linear.py`.
+- Adds the §8 peer-deviation rule: `peer_dev_campus` at t, with cut-offs tuned on train macro-F1 (Warning < −0.25, Faulty < −0.45). Offline bins are predicted Faulty.
+
+  | Model (macro-F1) | Val | Test | Test before / after 14 Feb | Unseen |
+  |---|---|---|---|---|
+  | Logistic | 0.623 | 0.549 | 0.677 / 0.486 | 0.416 |
+  | Rule: status of Health(t) | 0.629 | 0.649 | 0.686 / 0.585 | 0.543 |
+  | Rule: peer deviation | **0.648** | 0.233 | **0.702** / 0.196 | 0.207 |
+
+- Faulty PR-AUC on test: Logistic 0.773, Health(t) rule 0.822, peer rule 0.781.
+- **Key finding:** the peer rule is the best classifier on val and on the test year before 14 Feb, but collapses after it (Faulty recall 0.18).
+  - Peer deviation cancels the irradiance sensor change; B1's labels do not.
+  - After 14 Feb, 52% of rows are labelled Faulty while the inverters perform normally compared with their peers.
+  - So most post-change "Faulty" labels are caused by the sensor, not by the inverters. **For B1:** this supports fixing the target.
+- Per season (test): winter is easiest (Ridge RMSE 13.1); summer is hardest (20.2), with the highest Faulty share (56%).
+  - Persistence beats Ridge on test MAE in every season.
+- Per inverter (test): the worst Ridge RMSE is Zone D Inverter 1 (23.7), whose test rows are 95% Faulty because of its wrong capacity (see EDA).
+  - Others with high error: S H Ho Sports Hall, UG Hall2 2F, Library Inverter 3.
+- Outputs:
+  - `a1_eval_classifiers.csv` (with confusion matrices), `a1_eval_by_season.csv`, `a1_eval_by_inverter.csv`, `a1_peer_rule.csv`
+  - `reports/figures/a1_ridge_residuals.png`
+
+**Isolation Forest on HKUST injected faults** (Done, branch `a1/iforest`, with A2) ([src/models/iforest_a1.py](src/models/iforest_a1.py))
+- Reviewed A2's `iforest_a2.py` and reproduced its result exactly: 33.3% detection, 19.4% false alarms, 36 TP / 2,396 FP. It needs `python -m src.preprocess --skip-comparison` first.
+- New in A1's version:
+  - contamination (0.01-0.1) and n_estimators (100-400) are tuned on B2's faults injected into Jul-Dec 2022 (validation), then 2023 test is scored once
+  - a second input set adds `peer_dev_campus`, recomputed after injection against the untouched campus median
+  - the false-alarm rate is split at 14 Feb
+
+  | Inputs | Settings | Detection | False alarms | Before / after 14 Feb |
+  |---|---|---|---|---|
+  | A2's 3 | A2 (0.05, 200) | 33.3% | 19.4% | 23.1% / 15.1% |
+  | A2's 3 | tuned (0.01, 200) | 17.6% | **6.7%** | 6.2% / 7.2% |
+  | + peer deviation | A2 (0.05, 200) | **56.5%** | 39.2% | 18.2% / 64.0% |
+  | + peer deviation | tuned (0.01, 400) | 30.6% | 24.9% | 11.8% / 40.4% |
+
+- Tuning trades detection for far fewer false alarms. Peer deviation raises detection but also false alarms after 14 Feb.
+- **Cause of the false alarms after 14 Feb:** the test population keeps only Health ≥ 90 rows.
+  - After the sensor change, the rows that still pass are the ones outperforming their peers: mean peer deviation +0.36, against +0.03 in train.
+  - Choosing "normal" rows with B1's labels stops working after 14 Feb. This is a limitation of the benchmark design, not of peer deviation.
+- Precision is 1-2% in every setting (108 injected rows among about 12k).
+- Outputs: `a1_iforest_tuning.csv`, `a1_iforest_test.csv`
+
 **Write-up: Reproducibility section** (Draft) ([reports/reproducibility.md](reports/reproducibility.md))
 - Covers environment, data sources and licences, pipeline commands in order with measured run times, seeds and config, leakage controls, results tracking, and caveats.
 - Rows for B1's and B2's entry points are marked "to be completed".
 
 ## Open issues
-- Tilt is empty for UG Hall4 and Hall7 (`"0/15deg"`, `"0/11deg"`). Azimuth is `"Mixed"` for several stations.
+- Azimuth is `"Mixed"` for several stations. (Tilt is fixed on `a1/tilt-fix`.)
+- The A1 branches are independent. After they are merged, re-run `linear_evaluation.py` with the outage features and the selected balancing, and log the final rows to `results.csv` once.
+- Isolation Forest: the Health ≥ 90 "normal" filter is biased after 14 Feb. A label-free normal filter (for example a peer-deviation band) would make the benchmark fairer.
 - Zone D capacities are inconsistent with the data (see EDA). Indoor Sports Centre's capacity is fine.
 - **For B1:** the health score uses raw irradiance, so the 2023-02-14 sensor change pushes 52% of post-change rows into Faulty. `create_forecasting_target` shifts by row, which can jump overnight on daylight-filtered data. Missing power is filled with 0, so outages score health 0.
 - **For B2:**
@@ -123,7 +207,10 @@
 ## To do (A1)
 - [ ] Share `hkust_15min_v1.parquet` with the team (Drive/OneDrive)
 - [ ] Tell the team about the irradiance sensor change and the Zone D capacities (see EDA)
-- [ ] Features: `is_offline`, minutes offline in the last 24 h
-- [ ] Re-run baselines once B1 fixes the target; add the peer-deviation rule once B1 builds that feature
-- [ ] Isolation Forest on HKUST with injected faults (with A2)
+- [x] Features: `is_offline`, minutes offline in the last 24 h (`a1/outage-features`)
+- [x] Add the peer-deviation rule (`a1/evaluation`)
+- [ ] Re-run baselines once B1 fixes the target
+- [x] Stage 5 balancing for Logistic (`a1/balancing`)
+- [x] Stage 11 evaluation of Ridge / Logistic (`a1/evaluation`)
+- [x] Isolation Forest on HKUST with injected faults (`a1/iforest`); A2 to review
 - [ ] Finish the reproducibility section once B1 and B2 add their entry points
