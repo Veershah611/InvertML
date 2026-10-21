@@ -1,5 +1,5 @@
 version,task,features,metric,validation_score
-all,regression,39,rmse,10.056
-all,classification,39,macro_f1,0.6371
+all,regression,39,rmse,10.055
+all,classification,39,macro_f1,0.6386
 pruned,regression,37,rmse,10.064
-pruned,classification,37,macro_f1,0.638
+pruned,classification,37,macro_f1,0.6372

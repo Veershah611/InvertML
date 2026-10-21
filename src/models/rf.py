@@ -345,12 +345,15 @@ def run(resume=False):
     reg = models[reg_name][0]
     cls = models[cls_name][0]
     explanations(reg, cls, splits["val"], splits["test"])
-    for name, task, score in [(reg_name, "regression", "rmse"),
-                               (cls_name, "classification", "macro_f1")]:
+    # Shared results.csv format: "RMSE: x" / "F1: x, Faulty recall: y"
+    formats = {"regression": lambda r: f"RMSE: {r['rmse']:.2f}",
+               "classification": lambda r: f"F1: {r['macro_f1']:.2f}, Faulty recall: {r['faulty_recall']:.2f}"}
+    for name, task in [(reg_name, "regression"), (cls_name, "classification")]:
         subset = result[result.model.eq(name)].set_index("split")
+        fmt = formats[task]
         log_experiment("A2", name, task,
-                       subset.loc["train", score], subset.loc["val", score],
-                       subset.loc["test", score], subset.loc["test_unseen", score],
+                       fmt(subset.loc["train"]), fmt(subset.loc["val"]),
+                       fmt(subset.loc["test"]), fmt(subset.loc["test_unseen"]),
                        notes=f"one-hour future target; balancing={balance}; mean imputation")
     manifest = {"balancing": balance, "regression_params": reg_params,
                 "classification_params": cls_params,
