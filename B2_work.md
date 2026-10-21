@@ -67,18 +67,68 @@ You must analyze the data to answer two specific operational questions and turn 
 You will write the code for your feature group and plug it into the shared `src/features.py`.
 
 #### 1. Cyclical Time Features (Hour and Day of Year)
-* **The Problem:** A standard number for hour (0 to 23) tricks a model into thinking hour 23 (11:00 PM) and hour 0 (midnight) are as far apart as possible, even though they are just 1 hour apart.
-* **The Solution (Algorithm):** Sine and Cosine cyclic encoding.
-  $$\text{hour\_sin} = \sin\left(\frac{2\pi \times \text{hour}}{24}\right), \quad \text{hour\_cos} = \cos\left(\frac{2\pi \times \text{hour}}{24}\right)$$
-  $$\text{day\_sin} = \sin\left(\frac{2\pi \times \text{day\_of\_year}}{365.25}\right), \quad \text{day\_cos} = \cos\left(\frac{2\pi \times \text{day\_of\_year}}{365.25}\right)$$
-* **Why it matters:** Neural networks and linear models understand cyclic circular patterns instantly with this conversion.
+* **The Problem:** A standard number for hour (0 to 23) tricks a model into thinking hour 23 (11:00 PM) and hour 0 (midnight) are as far apart as possible ($23 - 0 = 23$), even though in reality they are separated by just 1 minute. Similarly, December 31 (Day 365) and January 1 (Day 1) appear 364 days apart numerically.
+* **The Solution (Algorithm):** 2D Sine and Cosine circular transformation.
 
-#### 2. Station Metadata Features
-* **What you use:** Station capacity (kWp), roof orientation (azimuth angle), and tilt angle (extracted from the Brick metadata parsed by A1).
-* **How it is performed:**
-  * Normalize numerical capacity.
-  * One-hot encode or categorize categorical orientation (e.g., South-facing vs East/West-facing).
-* **Why it matters:** Allows the model to understand why a 10 kW station generates less raw power than a 50 kW station without mistaking it for degradation.
+##### Exact Step-by-Step Mathematical Formulation:
+1. **Continuous Fractional Hour ($t_{\text{hour}}$):**
+   $$t_{\text{hour}} = \text{hour} + \frac{\text{minute}}{60.0} \quad \in [0.0, 23.75]$$
+   $$\theta_{\text{hour}} = 2\pi \times \left(\frac{t_{\text{hour}}}{24.0}\right)$$
+   $$\text{hour\_sin} = \sin(\theta_{\text{hour}}), \quad \text{hour\_cos} = \cos(\theta_{\text{hour}})$$
+   * *Concrete Example:* At 13:45 (1:45 PM): $t_{\text{hour}} = 13 + 45/60 = 13.75$. $\theta_{\text{hour}} = 2\pi \times (13.75 / 24) \approx 3.60\text{ rad}$. Then $\text{hour\_sin} \approx -0.44$, $\text{hour\_cos} \approx -0.90$.
+
+2. **Continuous Fractional Day of Year ($t_{\text{day}}$):**
+   $$t_{\text{day}} = \text{day\_of\_year} + \frac{t_{\text{hour}}}{24.0} \quad \in [1.0, 366.0]$$
+   $$\theta_{\text{day}} = 2\pi \times \left(\frac{t_{\text{day}}}{365.25}\right)$$
+   $$\text{day\_sin} = \sin(\theta_{\text{day}}), \quad \text{day\_cos} = \cos(\theta_{\text{day}})$$
+   * *Concrete Example:* On July 1 (Day 182): $\theta_{\text{day}} \approx 2\pi \times (182.57 / 365.25) \approx 3.14\text{ rad}$. Then $\text{day\_sin} \approx 0.00$, $\text{day\_cos} \approx -1.00$ (representing the mid-year summer solstice peak).
+
+* **Why it matters:** Neural networks and linear models understand cyclic circular patterns seamlessly without artificial boundary discontinuities.
+
+---
+
+#### 2. Station Metadata Features (Physical Rooftop Blueprints)
+Extracted and parsed from the Brick metadata files (`inverter_metadata.parquet`):
+
+1. **`capacity_kwp` (Rated DC Array Size):**
+   $$\text{capacity\_kwp} = \frac{\sum_{j=1}^{M} (\text{panel\_count}_j \times \text{panel\_wattage}_j)}{1000.0}$$
+   * *Example:* 80 panels of 315W = $80 \times 315 / 1000 = 25.2\text{ kWp}$.
+
+2. **`tilt_deg` (Rooftop Panel Slope Angle):**
+   $$\text{tilt\_deg} = \begin{cases} 
+   \text{float}(s) & \text{if clean single angle} \\
+   \text{non\_zero\_part} & \text{if multi-tilt string (e.g. '0/15deg')} \\
+   15.0^\circ & \text{if missing (campus median imputation)}
+   \end{cases}$$
+
+3. **`altitude_m` (Building Elevation):**
+   Building elevation in meters above sea level (e.g. $50.0\text{ m}$).
+
+4. **One-Hot Roof Orientation Flags (`orient_south`, `orient_east_west`, `orient_mixed`):**
+   Derived from compass azimuth angle ($\phi$ in degrees):
+   * **South-Facing (`orient_south`):** Captures peak noon sun.
+     $$\text{orient\_south} = 1 \quad \iff \quad 135^\circ \le \phi \le 225^\circ \quad (\text{else } 0)$$
+   * **East/West-Facing (`orient_east_west`):** Captures morning or evening generation.
+     $$\text{orient\_east\_west} = 1 \quad \iff \quad 45^\circ \le \phi < 135^\circ \quad \text{or} \quad 225^\circ < \phi \le 315^\circ \quad (\text{else } 0)$$
+   * **Mixed / Flat Roof (`orient_mixed`):** Flat roofs with panels tilted in multi-string arrays.
+     $$\text{orient\_mixed} = 1 \quad \iff \quad \text{azimuth contains 'mixed'} \quad (\text{else } 0)$$
+
+---
+
+#### 3. Master Pipeline Feature Formulae Reference (For Viva & Presentation)
+
+For complete end-to-end understanding, here are the exact mathematical definitions of all key engineered signals across our system:
+
+| Feature Name | Mathematical Formula | Physical Meaning |
+|---|---|---|
+| **Specific Yield** | $\text{Yield} = \frac{P_{\text{AC}} / 1000.0}{\text{capacity\_kwp}}$ | Standardized power in $\text{kW/kWp}$, enabling fair comparison between small ($10\text{ kW}$) and large ($50\text{ kW}$) rooftops. |
+| **Performance Ratio (PR)** | $\text{PR} = \frac{P_{\text{AC}}}{(G / 1000.0) \times (\text{capacity\_kwp} \times 1000.0) \times 0.78}$ | Efficiency ratio comparing actual power to expected physical solar generation under sunlight $G$ ($\text{W/m}^2$) and standard derate ($0.78$). |
+| **Continuous Health Score** | $\text{Health}(t) = \min(100.0, \max(0.0, \text{PR}(t) \times 100.0))$ | Normalized health score from $0\text{ to }100$ points. |
+| **Campus Peer Deviation (B1)** | $\text{peer\_dev\_campus}(i, t) = \frac{\text{PR}_i(t) - \text{Median}(\text{PR}_{\text{campus}}(t))}{\text{Median}(\text{PR}_{\text{campus}}(t)) + \epsilon}$ | Compares inverter $i$ to all other 43 campus inverters at the same 15-min tick; cancels out ambient cloud cover and sensor calibration jumps! |
+| **Station Peer Deviation (B1)** | $\text{peer\_dev\_station}(i, t) = \frac{\text{PR}_i(t) - \text{Median}(\text{PR}_{\text{station}}(t))}{\text{Median}(\text{PR}_{\text{station}}(t)) + \epsilon}$ | Compares inverter $i$ to other inverters on the *exact same building roof*. |
+| **30-Day Self Deviation (B1)** | $\text{self\_dev\_30d}(i, t) = \frac{\text{PR}_i(t) - \text{Baseline}_{30d}(G_{\text{bin}})}{\text{Baseline}_{30d}(G_{\text{bin}}) + \epsilon}$ | Compares inverter $i$ to its own 30-day historical trailing median under the same sunlight bracket; captures gradual hardware degradation. |
+| **Thermal Stress Interaction (B1)** | $\text{thermal\_stress} = \left(\frac{G}{1000.0}\right) \times T_{\text{ambient}}$ | Interaction between solar irradiance $G$ ($\text{W/m}^2$) and ambient temperature ($^\circ\text{C}$); captures inverter thermal throttling. |
+| **Temperature STC Delta** | $\text{temp\_delta\_stc} = T_{\text{ambient}} - 25.0^\circ\text{C}$ | Departure from standard laboratory test conditions ($25^\circ\text{C}$). |
 
 ---
 
