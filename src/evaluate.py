@@ -40,7 +40,7 @@ if CONFIG_FILE.exists():
 else:
     CONFIG = {}
 
-# The 7 stations held out to test how models work on brand new rooftops
+# The 6 stations that start only in 2023, held out to test unseen rooftop generalization
 DEFAULT_UNSEEN_STATIONS = [
     "sq_block_p_inverter",
     "shaw_auditorium_inverter",
@@ -48,8 +48,8 @@ DEFAULT_UNSEEN_STATIONS = [
     "ug_hall9_inverter",
     "zone_a2_inverter_2",
     "zone_a2_inverter_3",
-    "sq14_inverter",
 ]
+
 
 
 # ---------------------------------------------------------------------------

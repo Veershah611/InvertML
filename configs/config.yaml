@@ -23,7 +23,7 @@ split:
   test_start: "2023-01-01"
   test_end: "2023-12-31"
 
-# Stage 11: unseen-station holdout (~20% of inverters/stations, ~7 inverters)
+# Stage 11: unseen-station holdout (the 6 inverters that start only in 2023)
 unseen_stations:
   - sq_block_p_inverter
   - shaw_auditorium_inverter
@@ -31,5 +31,5 @@ unseen_stations:
   - ug_hall9_inverter
   - zone_a2_inverter_2
   - zone_a2_inverter_3
-  - sq14_inverter
+
 
