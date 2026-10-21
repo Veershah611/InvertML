@@ -218,9 +218,18 @@ def get_clean_features(df, horizon_steps=4):
 # 4. Training and Evaluation Function
 # ===========================================================================
 
-def run_mlp_experiment(train_df, val_df, test_df, unseen_df=None):
+def run_mlp_experiment(train_df, val_df, test_df, unseen_df=None, max_train_samples=60000, max_val_samples=30000, max_test_samples=30000):
     """Train mlp_regressor and mlp_classifier and evaluate performance."""
     start_total = time.time()
+    if max_train_samples and len(train_df) > max_train_samples:
+        train_df = train_df.iloc[:max_train_samples]
+    if max_val_samples and len(val_df) > max_val_samples:
+        val_df = val_df.iloc[:max_val_samples]
+    if max_test_samples and len(test_df) > max_test_samples:
+        test_df = test_df.iloc[:max_test_samples]
+    if unseen_df is not None and max_test_samples and len(unseen_df) > max_test_samples:
+        unseen_df = unseen_df.iloc[:max_test_samples]
+
     print("\nPreparing training, validation, and test datasets...")
     train_df = prepare_mlp_data(train_df)
     val_df = prepare_mlp_data(val_df)
@@ -348,7 +357,7 @@ def run_mlp_experiment(train_df, val_df, test_df, unseen_df=None):
 # 5. Hyperparameter Tuning (Stage 10: RandomizedSearchCV with TimeSeriesSplit)
 # ===========================================================================
 
-def tune_mlp_regressor(X_train, y_train, sample_fraction=0.15, random_state=42):
+def tune_mlp_regressor(X_train, y_train, sample_fraction=0.15, random_state=42, **kwargs):
     """Exhaustively tune MLPRegressor across all parameter combinations using GridSearchCV with TimeSeriesSplit."""
     # 1. Take a time-ordered sample to keep laptop runtimes reasonable
     n_samples = max(1000, int(len(X_train) * sample_fraction))

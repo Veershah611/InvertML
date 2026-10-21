@@ -26,3 +26,5 @@ timestamp,student,model,task,train_score,val_score,test_score,unseen_score,notes
 2026-10-21 13:05,A1,Logistic Regression,classification,"F1: 0.61, Faulty recall: 0.68","F1: 0.62, Faulty recall: 0.73","F1: 0.55, Faulty recall: 0.71","F1: 0.42, Faulty recall: 0.61","C=1; class_weight=balanced (Stage 5 winner); 18 features incl. outage; test before/after 14 Feb: F1: 0.68, Faulty recall: 0.75 / F1: 0.49, Faulty recall: 0.71"
 2026-10-21 15:09,B2,MLPRegressor,regression,RMSE: 3.36,RMSE: 3.41,RMSE: 3.42,RMSE: 3.45,"Trained in 2.7s, (64, 32) hidden layers, Adam, ReLU"
 2026-10-21 15:10,B2,MLPClassifier,classification,F1: 1.00,F1: 1.00,F1: 1.00,F1: 1.00,"Trained in 0.8s, Dedicated Softmax across Healthy, Warning, Faulty"
+2026-10-21 17:22,B2,MLPRegressor,regression,RMSE: 6.42,RMSE: 20.76,RMSE: 28.12,RMSE: 25.26,"Trained in 10.4s, (64, 32) hidden layers, Adam, ReLU"
+2026-10-21 17:22,B2,MLPClassifier,classification,F1: 0.68,F1: 0.51,F1: 0.19,F1: 0.26,"Trained in 3.1s, Dedicated Softmax across Healthy, Warning, Faulty"
