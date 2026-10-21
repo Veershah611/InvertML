@@ -5,6 +5,8 @@
 **Assignment Reference:** Innovative Assignment Guidelines §2 (Stages 9, 10, 11) & [`Solar_Inverter_Health_Monitoring.md`](file:///Users/hettala/Downloads/ML%20ass/Solar_Inverter_Health_Monitoring.md)  
 **Driver Modules:** [`src/models/xgb.py`](file:///Users/hettala/Downloads/ML%20ass/src/models/xgb.py), [`src/models/iforest.py`](file:///Users/hettala/Downloads/ML%20ass/src/models/iforest.py), [`notebooks/03_xgb_B1.ipynb`](file:///Users/hettala/Downloads/ML%20ass/notebooks/03_xgb_B1.ipynb)
 
+> **Correction (2026-10-21, target-leakage fix).** An earlier version of this section reported test RMSE 0.30 and Macro-F1 1.00. Those numbers came from target leakage: the model predicted Health(t) = PR(t) x 100, and three of its inputs (`peer_dev_campus`, `peer_dev_station`, `self_dev_30d`) are computed from the same PR(t), so it rebuilt the target from its own inputs (§7.2 of the design doc). XGBoost now forecasts **Health(t + 1 h)** from features at t (Option A, the same target as A1 and A2), uses B2's split functions with the held-out inverters excluded from train and validation, and fills missing values with training medians only. Every number below comes from `python -m src.models.xgb --tune` on this code.
+
 ---
 
 ## 9.1 Theoretical Framework of Gradient Boosted Decision Trees (XGBoost)
@@ -63,41 +65,53 @@ The project specification mandates comparing two distinct machine learning parad
 2. **Method 2 (Thresholded Continuous Regressor):** An `XGBRegressor` trained using mean squared error loss, whose continuous predictions $\hat{y}$ are converted post-hoc via fixed physical thresholds:
    $$\hat{c} = \begin{cases} \text{Healthy} & \text{if } \hat{y} \ge 90.0 \\ \text{Warning} & \text{if } 70.0 \le \hat{y} < 90.0 \\ \text{Faulty} & \text{if } \hat{y} < 70.0 \end{cases}$$
 
-### Empirical Strategy Comparison
+### Empirical Strategy Comparison (validation, Jul-Dec 2022, 190,158 rows)
 
-```
-Method 1 (Dedicated Multi-Class Classifier):
-  - Macro-F1: 1.0000 | Faulty Recall: 1.0000 | Healthy Recall: 1.0000 | Warning Recall: 1.0000
-Method 2 (Thresholded Continuous Regressor):
-  - Macro-F1: 0.9421 | Faulty Recall: 0.8850 | Healthy Recall: 0.9820 | Warning Recall: 0.8910
-```
+| Method | Macro-F1 | Faulty Recall | Faulty Precision |
+| :--- | :---: | :---: | :---: |
+| **Method 1: Dedicated classifier (selected)** | 0.6725 | **0.7296** | 0.7902 |
+| Method 2: Thresholded regressor | **0.6875** | 0.6193 | **0.9333** |
 
-### Analytical Justification for Final Deployment
-* **Boundary Uncertainty:** Near the $70.0$ and $90.0$ thresholds, a tiny residual error of $0.5$ in regression shifts the predicted category, causing boundary flutter.
-* **Loss Function Alignment:** Regression optimizes symmetric $L_2$ distance across all samples equally. In contrast, the dedicated multi-class cross-entropy loss with sample weights penalizes false negatives on the rare `Faulty` class exponentially harder, delivering a **$100\%$ Fault Detection Recall** critical for avoiding field catastrophic failures.
+### Justification
+* **Selection rule:** Faulty recall is the project's primary metric (§11.2), so Method 1 is selected. It catches 11 points more of the Faulty rows; Method 2 is more precise and slightly better on macro-F1 but misses more faults.
+* **Why Method 2 misses faults:** the regressor minimises squared error over all rows, so its predictions are pulled towards the common Healthy range and fewer of them cross below the 70 threshold.
+* **Boundary sensitivity:** near the 70 and 90 thresholds a small regression error changes the predicted class, which a dedicated classifier with weighted cross-entropy avoids.
+
+## 5.1 Stage 5: Class Balancing for the Dedicated Classifier
+
+Two strategies were compared on the validation set, both applied to training rows only ([`reports/tables/b1_xgb_balancing.csv`](tables/b1_xgb_balancing.csv)):
+
+| Strategy | Train rows | Macro-F1 | Faulty Recall | Faulty Precision | Faulty PR-AUC |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Sample weights (balanced, Faulty x1.35), selected** | 270,448 | 0.6725 | **0.7296** | 0.7902 | 0.8377 |
+| Healthy undersampling (2 Healthy : 1 other) | 143,502 | 0.6900 | 0.6958 | 0.8631 | 0.8447 |
+
+* Selected on validation Faulty recall, then macro-F1 (the rule A1 and A2 used). Sample weights catch 3.4 points more of the Faulty rows; undersampling is more precise but misclassifies far more Warning rows as Healthy (12,465 against 5,864).
+* **SMOTE was rejected:** interpolating between rows invents telemetry that never happened and mixes rows from different days and inverters.
+* Validation and test sets are never resampled.
 
 ---
 
 ## 10.1 Stage 10: Hyperparameter Tuning & Regularization Analysis
 
-To balance bias and variance across temporal regimes, hyperparameter optimization was executed using B2's strict validation framework ([`src/evaluate.py`](file:///Users/hettala/Downloads/ML%20ass/src/evaluate.py)), tuning against the held-out validation set ($\text{2022-07-01}$ to $\text{2022-12-31}$). Native early stopping (`early_stopping_rounds=30`) monitored validation loss to prevent overfitting.
+Five configurations (250 trees each) were trained on the last 20% of the training period (time-ordered, for CPU runtime) and scored on the validation set (2022-07-01 to 2022-12-31) using B2's split functions. No early stopping is used; the validation set only ranks the configurations. The best configuration is then refit on the full training split.
 
 ### 10.1.1 Hyperparameter Sweep Results
 
-The empirical results from [`reports/tables/b1_xgb_default_vs_tuned.csv`](file:///Users/hettala/Downloads/ML%20ass/reports/tables/b1_xgb_default_vs_tuned.csv) are summarized below:
+From [`reports/tables/b1_xgb_default_vs_tuned.csv`](tables/b1_xgb_default_vs_tuned.csv):
 
 | Config ID | `max_depth` | `learning_rate` | `subsample` | `colsample_bytree` | `reg_alpha` | `reg_lambda` | Train RMSE | Val RMSE | Val MAE | Runtime (s) |
 | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Config 2 (Winner)** | **6** | **0.03** | **0.85** | **0.85** | **0.10** | **1.50** | **0.214** | **11.644** | **4.093** | **0.5s** |
-| Config 1 | 4 | 0.05 | 0.80 | 0.80 | 0.01 | 1.00 | 0.261 | 11.694 | 4.149 | 0.4s |
-| Config 3 | 6 | 0.05 | 0.80 | 0.80 | 0.05 | 1.00 | 0.184 | 11.732 | 4.184 | 0.5s |
-| Config 4 | 8 | 0.02 | 0.80 | 0.75 | 0.20 | 2.00 | 0.224 | 11.749 | 4.197 | 0.6s |
-| Config 5 | 8 | 0.05 | 0.70 | 0.70 | 0.50 | 2.50 | 0.148 | 11.861 | 4.277 | 0.6s |
+| **Config 1 (Winner)** | **4** | **0.05** | **0.80** | **0.80** | **0.01** | **1.00** | **7.998** | **13.098** | **6.394** | **2.8** |
+| Config 2 | 6 | 0.03 | 0.85 | 0.85 | 0.10 | 1.50 | 7.479 | 13.488 | 6.571 | 3.5 |
+| Config 3 | 6 | 0.05 | 0.80 | 0.80 | 0.05 | 1.00 | 7.040 | 13.528 | 6.584 | 4.0 |
+| Config 4 | 8 | 0.02 | 0.80 | 0.75 | 0.20 | 2.00 | 7.051 | 13.874 | 6.878 | 4.5 |
+| Config 5 | 8 | 0.05 | 0.70 | 0.70 | 0.50 | 2.50 | 6.053 | 14.557 | 7.013 | 4.6 |
 
 ### 10.1.2 Key Insights from the Optimization Study
-1. **Depth Regularization (`max_depth = 6`):** Deeper trees (`max_depth = 8`, Config 5) drove training RMSE down to $0.148$ but suffered validation degradation ($11.861$ RMSE), indicating memorization of station-specific micro-climates. Restricting depth to 6 forced the model to learn invariant physical relationships.
-2. **Feature Subsampling (`colsample_bytree = 0.85`):** Subsampling $85\%$ of features per tree split prevented the dominant `peer_deviation_ratio` from masking secondary thermal interaction indicators.
-3. **Conservative Shrinkage (`learning_rate = 0.03`):** Slowing down the gradient steps allowed the ensemble to settle into a broader, flatter local minimum that generalized robustly across seasonal transitions.
+1. **Shallower trees generalise better.** Validation RMSE rises steadily with depth (13.10 at depth 4, up to 14.56 at depth 8) while training RMSE falls (8.00 to 6.05): deeper trees fit the training period more closely and transfer worse to the next six months.
+2. **The gain from tuning is modest.** The spread between the best and worst configuration is 1.5 RMSE points. On the full training split the selected model reaches validation RMSE 10.90 (§11.1.1).
+3. **Limitation:** only five hand-picked configurations were searched, and the regressor is tuned on a 20% sample. A wider RandomizedSearch with early stopping is a possible extension.
 
 ---
 
@@ -109,14 +123,21 @@ All evaluations strictly follow B2's validation protocol:
 
 ### 11.1.1 XGBoost Performance Summary
 
-| Split / Scenario | Task | Primary Metric | Secondary Metric | Notes |
-| :--- | :--- | :--- | :--- | :--- |
-| **Train Set ($\le 2022\text{-}06$)** | Regression | **RMSE: 0.24** | MAE: 0.08, $R^2$: 0.999 | No overfitting due to strong $L_2$ regularization |
-| **Validation Set ($2022\text{-}H2$)** | Regression | **RMSE: 0.30** | MAE: 0.11, $R^2$: 0.998 | Validated during hyperparameter early stopping |
-| **Chronological Test ($2023$)** | Regression | **RMSE: 0.30** | MAE: 0.11, $R^2$: 0.998 | Stable generalization across full annual cycle |
-| **Unseen Stations (7 Held-out)** | Regression | **RMSE: 0.22** | MAE: 0.09, $R^2$: 0.999 | Zero degradation on completely unseen rooftop geometries |
-| **Test Set ($2023$)** | Classification | **Macro-F1: 1.000** | **Faulty Recall: 1.000** | Dedicated `XGBClassifier` with class reweighting |
-| **Unseen Stations** | Classification | **Macro-F1: 1.000** | **Healthy Recall: 1.000** | Preserves zero false alarms on unseen rooftops |
+Target: Health(t + 1 h). Features: the 13 Stage 7 features plus Health(t). Persistence (Health(t + 1 h) = Health(t)) is the bar a forecaster must beat.
+
+| Split | Rows | XGB RMSE | XGB MAE | $R^2$ | Persistence RMSE | Macro-F1 | Faulty Recall |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| Train ($\le$ 2022-06) | 270,448 | 8.91 | 4.43 | 0.834 | 12.13 | 0.678 | 0.768 |
+| Validation (2022 H2) | 190,158 | **10.90** | 5.89 | 0.799 | 12.92 | 0.673 | 0.730 |
+| Test (2023) | 464,676 | 20.07 | 15.58 | 0.332 | **16.56** | 0.510 | 0.452 |
+| Test before 14 Feb 2023 | 35,860 | **10.01** | | | 10.88 | 0.703 | 0.803 |
+| Test after 14 Feb 2023 | 428,816 | 20.69 | | | **16.95** | 0.460 | 0.446 |
+| Unseen inverters (2023) | 46,980 | 17.60 | 12.98 | 0.410 | 17.14 | 0.429 | 0.348 |
+
+**Reading the results.**
+1. **XGBoost beats persistence on train, validation and the start of 2023.** Validation RMSE 10.90 is better than A1's Ridge (11.86) and persistence (12.92), and close to A2's Random Forest (10.01 tuned).
+2. **It falls behind persistence after 2023-02-14.** That day the irradiance sensor changes scale (A1 EDA) and B1's health score, which uses raw irradiance, marks about half of the post-change rows Faulty. The model learnt 2021-22 relationships between features and health that no longer hold, while persistence simply copies the shifted label. This is a target problem, not a model problem: fixing the health score's irradiance scaling is the next step for B1.
+3. **Unseen inverters:** RMSE 17.60, close to persistence (17.14), so the model transfers to new rooftops no worse than the trivial forecast, but not better.
 
 ---
 
@@ -128,32 +149,48 @@ To eliminate the "black-box" risk in critical electrical infrastructure, Tree-SH
 
 The global beeswarm plot ([`reports/figures/b1_shap_summary.png`](file:///Users/hettala/Downloads/ML%20ass/reports/figures/b1_shap_summary.png)) displays the distribution of impact each feature has on the model's output:
 
-1. **`peer_deviation_ratio` (Dominant Rank 1):** Exhibits the widest SHAP value dispersion ($\pm 15.0$ Health Score impact). High values (inverter generating on par with campus rooftop peers) strongly push predictions towards $100\%$, while low values ($< 0.85$) exert heavy negative pressure.
-2. **`irradiance_wm2` & `generation_to_temp_interaction` (Ranks 2 & 3):** Under high irradiance ($> 800\text{ W/m}^2$), health scores are highly sensitive to thermal throttling. When temperature exceeds $50^\circ\text{C}$, the interaction term depresses health expectations appropriately.
-3. **`self_relative_ratio_30d` (Rank 4):** Captures gradual multi-week soiling and string degradation, providing an anchor against sudden transient noise.
+Mean absolute SHAP value on 1,500 test rows (health points):
+
+| Rank | Feature | Mean \|SHAP\| |
+| :---: | :--- | :---: |
+| 1 | `health_now` (Health(t)) | 10.86 |
+| 2 | `peer_dev_campus` | 2.22 |
+| 3 | `self_dev_30d` | 2.20 |
+| 4 | `day_cos` | 1.09 |
+| 5 | `hour_sin` | 1.00 |
+| 6-11 | `day_sin`, `thermal_stress`, `peer_dev_station`, `capacity_kwp`, `altitude_m`, `tilt_deg` | 0.23-0.63 |
+| — | `orient_mixed`, `orient_south`, `orient_east_west` | about 0 |
+
+1. **Current health dominates**, as expected for a one-hour forecast: the best single guess for the next hour is the present state.
+2. **Peer and self deviation add the rest:** how the inverter compares with the campus right now, and with its own last 30 days, adjust the forecast up or down.
+3. **Seasonal and hour-of-day terms** come next, reflecting the daily and annual cycle.
+4. `orient_south` and `orient_east_west` contribute nothing because they are constant 0 for every inverter (a known metadata issue).
 
 ### 11.2.2 Local Explanation: Severe Prediction Waterfall Plot
 
 The local waterfall explanation ([`reports/figures/b1_shap_waterfall.png`](file:///Users/hettala/Downloads/ML%20ass/reports/figures/b1_shap_waterfall.png)) decomposes a severe prediction failure into individual additive contributions:
 $$\hat{f}(x) = \mathbb{E}[f(X)] + \sum_{j=1}^M \phi_j$$
-* **Expected Base Value $\mathbb{E}[f(X)]$:** $98.42\%$ (nominal campus baseline).
-* **Positive Pull:** Solar irradiance ($+1.12\%$) and low operating temperature ($+0.40\%$).
-* **Negative Pull:** Peer deviation ($ -2.38\%$) due to localized cloud cover that hit one wing of the rooftop while neighboring inverters remained in full sun.
-* **Final Model Output:** $97.56\%$.
+The plot shows the worst error in the SHAP sample (`zone_a2_inverter_3`, 2023-06-14 09:45):
+* **Base value $\mathbb{E}[f(X)]$:** 91.64.
+* **Largest contributions:** `self_dev_30d` -3.05 (value 0.29), `peer_dev_campus` +1.24 (value 0.13), `health_now` -1.11 (value 85.0), `capacity_kwp` +0.29.
+* **Model output:** 89.08. **Actual Health(t + 1 h):** 0.0.
+* Nothing at t pointed to the drop: health was 85 and the inverter was slightly above its peers. A sudden fall to 0 within the hour is not predictable from these features.
 
 ---
 
 ## 11.3 Failure Case Diagnosis: Top 3 Worst Prediction Residuals
 
-Inspection of the largest residuals from [`reports/tables/b1_xgb_failure_cases.csv`](file:///Users/hettala/Downloads/ML%20ass/reports/tables/b1_xgb_failure_cases.csv) reveals clear physical causes:
+From [`reports/tables/b1_xgb_failure_cases.csv`](tables/b1_xgb_failure_cases.csv) (largest errors in the 1,500-row SHAP sample of the 2023 test set). The table reports observed context only; the dataset has no maintenance logs, so causes are hypotheses.
 
-| Rank | Timestamp | Inverter ID | Actual Health | Predicted Health | Residual Error | Irradiance | Mod Temp | Physical Root Cause |
-| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **1** | 2023-12-12 07:30 | `library_inverter_1` | 97.56 | 99.94 | **2.38** | 291.1 | 22.9°C | **Low-Sun Morning Horizon Obstruction:** Steep winter sun angle casts shadow from adjacent library parapet onto string 1. |
-| **2** | 2023-10-03 12:45 | `zone_a1_inverter_2` | 96.76 | 98.99 | **2.22** | 944.5 | 31.2°C | **Passing Cumulus Cloud Transient:** Isolated cloud edge covered inverter array while campus solar sensor was in clear sky. |
-| **3** | 2023-10-02 10:00 | `zone_a1_inverter_2` | 100.0 | 98.07 | **1.93** | 856.2 | 28.4°C | **Inverter MPPT Clipping Fluctuation:** Rapid transition into peak clipping plateau causing momentary $1.9\%$ model lag. |
+| Rank | Timestamp | Inverter ID | Health(t) | Actual Health(t+1h) | Predicted | Error | Irradiance (W/m²) | Ambient Temp | Valid 5-min readings |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| 1 | 2023-06-14 09:45 | `zone_a2_inverter_3` | 85.0 | 0.0 | 89.08 | 89.08 | 248.6 | 25.6 °C | 3 of 3 |
+| 2 | 2023-09-07 11:45 | `library_inverter_1` | 18.1 | 16.6 | 85.86 | 69.27 | 384.2 | 27.6 °C | 3 of 3 |
+| 3 | 2023-08-13 10:15 | `ug_hall2_2f_inverter` | 100.0 | 25.7 | 93.53 | 67.82 | 546.0 | 29.6 °C | 3 of 3 |
 
-**Mitigation Insight:** None of the top 3 residuals exceeded $2.5$ health points, and all occurred under physical horizon or edge-cloud transients. The model never falsely categorized a healthy inverter as faulty or missed an actual failure.
+**What the cases show.**
+1. **Sudden drops (cases 1 and 3):** health is normal at t and collapses within the hour. Nothing in the inputs at t signals this, so no forecaster built on these features can predict it; A1 found the same pattern for Ridge (outage onsets).
+2. **Persistent low health ignored (case 2):** health is 18 at t and stays low, yet the model predicts 86. After the 2023-02-14 sensor change many inverters show low health while their peer and self deviations look normal, and the model has learnt to discount a low `health_now` when the other features look healthy. This is the same sensor-change effect seen in §11.1.1.
 
 ---
 
@@ -178,17 +215,22 @@ The dual evaluation figure ([`reports/figures/b1_iforest_gpvs_detection.png`](fi
 
 ## 11.5 The 4-Track Master Benchmark Synthesis
 
-The culmination of the project brings together the four modeling tracks evaluated across identical chronological splits and unseen station benchmarks:
+Latest rows in `results/results.csv` (2026-10-21) for each track. All supervised rows forecast Health(t + 1 h) or status at t + 1 h on the 2023 test year.
 
-| Modeling Track | Student Lead | Model Architecture | Chronological Test RMSE | Unseen Stations RMSE | Fault Detection Recall | Macro-F1 Score | Inference Latency |
+| Track | Student | Model | Val RMSE | Test RMSE | Unseen RMSE | Test Macro-F1 | Test Faulty Recall |
 | :--- | :---: | :--- | :---: | :---: | :---: | :---: | :---: |
-| **Track T1** | **A1** | Ridge Regression / Logistic | 17.38 | 15.99 | 71.00% | 0.550 | **< 0.1 ms** |
-| **Track T2** | **A2** | Random Forest Baseline | 8.42 | 9.15 | 84.50% | 0.812 | 1.8 ms |
-| **Track T3** | **B1** | **Tuned XGBoost (Ours)** | **0.30** | **0.22** | **100.00%** | **1.000** | **0.4 ms** |
-| **Track T4** | **B2** | Multi-Layer Perceptron (MLP) | 4.76 | 5.04 | 95.00% | 0.960 | 3.2 ms |
-| **Track T5** | **B1 / B2**| Isolation Forest (GPVS Benchmark) | — | — | 68.00% | 0.723 (F1) | **0.1 ms** |
+| Baseline | A1 | Persistence | 12.92 | **16.56** | 17.14 | — | — |
+| T1 | A1 | Ridge / Logistic | 11.86 | 17.34 | **15.98** | 0.55 | 0.71 |
+| Baseline | A1 | Rule: status of Health(t) | — | — | — | **0.65** | **0.77** |
+| T2 | A2 | Random Forest (tuned) | **10.01** | 21.24 | 18.92 | 0.38 | — |
+| **T3** | **B1** | **XGBoost (tuned)** | 10.90 | 20.07 | 17.60 | 0.51 | 0.45 |
+| T4 | B2 | MLP | 20.76 | 28.12 | 25.26 | 0.19 | — |
+| T5 | B1 / B2 | Isolation Forest (GPVS-Faults) | — | — | — | Recall 0.68, F1 0.72 | — |
 
-### Grand Conclusion & Engineering Recommendations
-1. **XGBoost (Track T3) is the champion architecture for operational deployment.** It provides near-perfect predictive accuracy ($\text{RMSE } 0.30$), zero missed faults ($\text{Recall } 1.00$), and sub-millisecond inference times suitable for embedded edge devices or SCADA servers.
-2. **MLP (Track T4) provides smooth generalization.** As shown by B2, continuous neural embeddings prevent overfitting to rooftop idiosyncrasies, achieving a strong $5.04$ RMSE on unseen rooftops.
-3. **Isolation Forest (Track T5) offers essential zero-shot protection.** For new inverters deployed without historical maintenance logs, Isolation Forest provides immediate $68\%$ fault detection with a remarkably low $2\%$ false alarm rate.
+(A2's and B2's classification rows log a single score without the metric name; the values are shown as logged.)
+
+### Conclusions
+1. **No supervised model beats persistence on the 2023 test year.** XGBoost and Random Forest are the strongest regressors on validation, but every model degrades after the 2023-02-14 irradiance sensor change, because the health score inherits it. The ranking on 2023 says more about the label shift than about the models.
+2. **XGBoost's contribution:** among the best regressors on validation, and better than persistence on the test year before the sensor change (RMSE 10.01 against persistence 10.88), with Faulty recall 0.80 before the change. It is a credible forecaster for stable periods, not a "champion" for deployment.
+3. **Next step for the team:** fix the health score's dependence on raw irradiance (rescale after 2023-02-14, or base it on peer deviation), then re-run every track on the corrected target.
+4. **Isolation Forest** (Pair B, GPVS-Faults) remains a label-free cross-check; its numbers are on a different dataset and are not comparable with the HKUST rows.

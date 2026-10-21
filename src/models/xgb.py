@@ -2,15 +2,20 @@
 
 Student Owner: B1 (Feature Specialist & XGBoost Lead).
 
+Target (Option A in section 7.2, same as A1 and A2): Health(t + 1 h), the health
+score exactly one hour later on the same day, predicted from features at t.
+An earlier version predicted Health(t) from PR features at t, which rebuilds
+the target from its own inputs (target leakage).
+
 Core Responsibilities:
-1. xgb_regressor: Predicts continuous Health Score (0.0 to 100.0) with histogram-based boosting.
-2. xgb_classifier: Predicts 3-class operational status (Healthy, Warning, Faulty) with multi:softprob.
+1. xgb_regressor: Predicts continuous Health Score at t + 1 h (0.0 to 100.0) with histogram-based boosting.
+2. xgb_classifier: Predicts 3-class operational status at t + 1 h (Healthy, Warning, Faulty) with multi:softprob.
 3. Classification Strategy Comparison: Method 1 (Dedicated Classifier) vs. Method 2 (Thresholded Regressor).
-4. Stage 10 Hyperparameter Tuning: Tuning on B2's defined chronological splits (train_df and val_df)
-   with native early stopping on B2's validation fold.
-5. Stage 11 Evaluation: Evaluates on 2023 chronological test split and ~7 unseen held-out stations.
-6. Stage 11.3 Tree-SHAP Explainability: Global beeswarm summary, local failure waterfall plot, and failure case analysis.
-7. Logging official benchmark scores to results/results.csv via B2's log_experiment.
+4. Stage 10 Hyperparameter Tuning: Tuning on B2's defined chronological splits (train_df and val_df).
+5. Stage 5 Balancing: sample weights vs Healthy undersampling on the validation set.
+6. Stage 11 Evaluation: Evaluates on 2023 chronological test split and ~7 unseen held-out stations.
+7. Stage 11.3 Tree-SHAP Explainability: Global beeswarm summary, local failure waterfall plot, and failure case analysis.
+8. Logging official benchmark scores to results/results.csv via B2's log_experiment.
 
 Usage:
     python -m src.models.xgb            # Run baseline & tuned XGBoost models
@@ -19,6 +24,7 @@ Usage:
 """
 
 import argparse
+import json
 from datetime import datetime
 from pathlib import Path
 import sys
@@ -30,6 +36,7 @@ import pandas as pd
 import shap
 import xgboost as xgb
 import yaml
+from sklearn.metrics import average_precision_score, confusion_matrix
 
 from src.evaluate import (
     evaluate_classification,
@@ -59,6 +66,11 @@ TABLES_DIR.mkdir(parents=True, exist_ok=True)
 # Status class label mappings
 STATUS_MAP = {"Healthy": 0, "Warning": 1, "Faulty": 2}
 STATUS_REV_MAP = {0: "Healthy", 1: "Warning", 2: "Faulty"}
+
+# Forecasting setup: features at t, target exactly one hour later (4 bins of 15 min)
+HORIZON = pd.Timedelta("1h")
+XGB_FEATURES = STAGE_7_SELECTED_FEATURES + ["health_now"]
+HEALTHY_PER_OTHER = 2   # undersampling rule shared with A1 and A2
 
 # Optimal default hyperparameters for solar tabular telemetry
 DEFAULT_REG_PARAMS = {
@@ -141,50 +153,62 @@ def threshold_health_score(health_scores: np.ndarray | pd.Series) -> np.ndarray:
     return np.select(conditions, [0, 1, 2], default=0).astype(int)
 
 
+def build_forecast_dataset(raw: pd.DataFrame) -> pd.DataFrame:
+    """One row per (inverter, t): Stage 7 features at t, target Health(t + 1 h).
+
+    Features are built on the full 15-min grid before any split, so rolling and
+    peer statistics see all history that existed at t. The lead is kept only
+    when the row one hour ahead exists (same day, no overnight jump). Rows where
+    Health(t) or Health(t + 1 h) is undefined (irradiance < 100 W/m2) are dropped.
+    """
+    df = raw.copy()
+    df["inverter_id"] = df["inverter_id"].astype(str)
+    df = df.sort_values(["inverter_id", "time"]).reset_index(drop=True)
+    df = build_all_features(df)
+    df = compute_health_score(df)                     # B1's target, unchanged
+    df = df.rename(columns={"health_score": "health_now"})
+
+    lead = df[["inverter_id", "time", "health_now"]].rename(columns={"health_now": "health_lead"})
+    lead["time"] = lead["time"] - HORIZON
+    df = df.merge(lead, on=["inverter_id", "time"], how="left", validate="one_to_one")
+    df = df.dropna(subset=["health_now", "health_lead"]).reset_index(drop=True)
+    df["status_int"] = threshold_health_score(df["health_lead"].values)
+    return df
+
+
+def make_splits(dataset: pd.DataFrame) -> dict:
+    """B2's split functions; held-out inverters stay out of train and val (A2's rule)."""
+    _, val, test = split_chronological(dataset, time_col="time")
+    train, unseen = split_unseen_stations(dataset, station_col="inverter_id", time_col="time")
+    held = {s.lower() for s in CONFIG.get("unseen_stations", [])}
+    val = val[~val["inverter_id"].str.lower().isin(held)]
+    return {"train": train, "val": val, "test": test, "test_unseen": unseen}
+
+
+def train_fill_values(train_df: pd.DataFrame, feature_cols: list[str] = None) -> pd.Series:
+    """Feature medians from the training split only, used to fill every split."""
+    cols = feature_cols or XGB_FEATURES
+    return train_df[cols].astype(np.float32).median()
+
+
 def prepare_xgb_data(
     df: pd.DataFrame,
+    fill_values: pd.Series,
     feature_cols: list[str] = None
 ) -> tuple[pd.DataFrame, np.ndarray, np.ndarray, pd.DataFrame]:
-    """Prepare feature matrix X and targets y using Stage 7 feature selections.
-    
+    """Feature matrix and Health(t + 1 h) targets for one split of build_forecast_dataset().
+
+    Missing feature values are filled with training medians (fill_values),
+    never with statistics of the split itself.
+
     Returns:
         (X, y_regression, y_classification, df_clean)
     """
-    if feature_cols is None:
-        feature_cols = STAGE_7_SELECTED_FEATURES
-
-    df_prep = df.copy()
-
-    # 1. Ensure Stage 7 features are generated
-    if not all(col in df_prep.columns for col in feature_cols):
-        df_prep = build_all_features(df_prep)
-
-    # 2. Compute targets if not present
-    if "health_score" not in df_prep.columns:
-        df_prep = compute_health_score(df_prep, filter_daylight=True)
-    else:
-        # Filter daylight intervals
-        irr = df_prep["irradiance_wm2"] if "irradiance_wm2" in df_prep.columns else 100.0
-        df_prep = df_prep[irr >= 100.0].copy()
-
-    df_clean = df_prep.dropna(subset=["health_score"]).copy()
-
-    # 3. Numeric labels for classification
-    if "status_int" not in df_clean.columns:
-        if "status" in df_clean.columns:
-            df_clean["status_int"] = df_clean["status"].map(STATUS_MAP).fillna(0).astype(int)
-        else:
-            df_clean["status_int"] = threshold_health_score(df_clean["health_score"].values)
-
-    # Extract X and y
-    usable_features = [c for c in feature_cols if c in df_clean.columns]
-    X = df_clean[usable_features].copy().astype(np.float32)
-    X = X.fillna(X.median(numeric_only=True))
-
-    y_reg = df_clean["health_score"].values.astype(np.float32)
-    y_cls = df_clean["status_int"].values.astype(int)
-
-    return X, y_reg, y_cls, df_clean
+    cols = feature_cols or XGB_FEATURES
+    X = df[cols].astype(np.float32).fillna(fill_values[cols])
+    y_reg = df["health_lead"].values.astype(np.float32)
+    y_cls = df["status_int"].values.astype(int)
+    return X, y_reg, y_cls, df
 
 
 def compute_sample_weights(y: np.ndarray) -> np.ndarray:
@@ -196,6 +220,49 @@ def compute_sample_weights(y: np.ndarray) -> np.ndarray:
     if 2 in weights_dict:
         weights_dict[2] *= 1.35
     return np.array([weights_dict[val] for val in y], dtype=np.float32)
+
+
+def undersample_healthy(X: pd.DataFrame, y: np.ndarray) -> tuple[pd.DataFrame, np.ndarray]:
+    """Keep HEALTHY_PER_OTHER Healthy rows per non-Healthy row (training rows only)."""
+    healthy = np.flatnonzero(y == 0)
+    other = np.flatnonzero(y != 0)
+    keep = min(len(healthy), max(1, HEALTHY_PER_OTHER * len(other)))
+    sampled = np.random.RandomState(42).choice(healthy, size=keep, replace=False)
+    rows = np.sort(np.concatenate([sampled, other]))          # keep time order
+    return X.iloc[rows], y[rows]
+
+
+def compare_balancing(X_train, y_cls_train, X_val, y_cls_val) -> tuple[pd.DataFrame, str]:
+    """Stage 5: sample weights vs Healthy undersampling for the dedicated classifier.
+
+    Both are fitted on training rows only; validation is never resampled. SMOTE
+    is not used: interpolating between rows invents readings that never happened
+    and mixes rows from different days and inverters. The winner is chosen on
+    validation Faulty recall, then macro-F1 (the rule A1 and A2 used).
+    """
+    rows = []
+    for strategy in ["sample_weights", "undersampling"]:
+        if strategy == "sample_weights":
+            X_fit, y_fit = X_train, y_cls_train
+            weights = compute_sample_weights(y_cls_train)
+        else:
+            X_fit, y_fit = undersample_healthy(X_train, y_cls_train)
+            weights = None
+        model = build_xgb_classifier(DEFAULT_CLS_PARAMS)
+        model.fit(X_fit, y_fit, sample_weight=weights, verbose=False)
+        pred = model.predict(X_val)
+        m = evaluate_classification(y_cls_val, pred)
+        ap = average_precision_score(y_cls_val == 2, model.predict_proba(X_val)[:, 2])
+        rows.append({"strategy": strategy, "train_rows": len(X_fit), "val_rows": len(X_val),
+                     "macro_f1": m["macro_f1"], "faulty_recall": m["faulty_recall"],
+                     "faulty_precision": m["faulty_precision"], "faulty_pr_auc": round(float(ap), 4),
+                     "confusion_matrix": json.dumps(confusion_matrix(y_cls_val, pred, labels=[0, 1, 2]).tolist())})
+    result = pd.DataFrame(rows)
+    winner = result.sort_values(["faulty_recall", "macro_f1"], ascending=False).iloc[0]["strategy"]
+    result["selected"] = result["strategy"].eq(winner)
+    result.to_csv(TABLES_DIR / "b1_xgb_balancing.csv", index=False)
+    print("\nStage 5 balancing (validation):\n" + result.drop(columns="confusion_matrix").to_string(index=False))
+    return result, winner
 
 
 # ===========================================================================
@@ -245,22 +312,25 @@ def compare_classification_strategies(
 def run_hyperparameter_tuning(
     train_df: pd.DataFrame,
     val_df: pd.DataFrame,
-    sample_fraction: float = 0.20
+    sample_fraction: float = 0.20,
+    fill_values: pd.Series = None
 ) -> tuple[dict, pd.DataFrame]:
     """Execute hyperparameter grid sweep using B2's exact train and validation splits.
     
     Strict Design:
         - Trains candidate configurations on a time-ordered slice of B2's train_df.
-        - Evaluates early stopping and validation RMSE directly on B2's val_df.
+        - Scores validation RMSE directly on B2's val_df (no early stopping).
         - Avoids generic scikit-learn arbitrary row-index folds.
     """
     print("\n" + "=" * 65)
     print("STAGE 10: HYPERPARAMETER TUNING ON B2 CHRONOLOGICAL SPLITS")
     print("=" * 65)
 
-    # 1. Prepare features using Stage 7 selected set
-    X_train_full, y_reg_train_full, _, _ = prepare_xgb_data(train_df)
-    X_val, y_reg_val, _, _ = prepare_xgb_data(val_df)
+    # 1. Prepare features (Stage 7 set + Health(t)), filled with training medians
+    if fill_values is None:
+        fill_values = train_fill_values(train_df)
+    X_train_full, y_reg_train_full, _, _ = prepare_xgb_data(train_df, fill_values)
+    X_val, y_reg_val, _, _ = prepare_xgb_data(val_df, fill_values)
 
     # 2. Time-ordered sampling of training set for fast CPU search
     n_sample = int(len(X_train_full) * sample_fraction)
@@ -370,7 +440,7 @@ def run_shap_explainability(
     print(f"Saved: {summary_path.relative_to(ROOT)}")
 
     # 3. Residual Error Analysis: Identify Top 3 Worst Failures
-    y_true_sample = test_df_sample["health_score"].values
+    y_true_sample = test_df_sample["health_lead"].values
     preds_sample = model.predict(X_shap)
     residuals = np.abs(y_true_sample - preds_sample)
     worst_3_idx = np.argsort(residuals)[-3:][::-1]
@@ -392,36 +462,24 @@ def run_shap_explainability(
     plt.close()
     print(f"Saved: {waterfall_path.relative_to(ROOT)}")
 
-    # 5. Document Root Causes for Top 3 Failures
+    # 5. Record observed context for the top 3 failures. Causes are not
+    # inferred here: the data has no maintenance logs, so any explanation in
+    # the report is a hypothesis to check against this context.
     failures = []
     for rank, idx in enumerate(worst_3_idx, 1):
         row = test_df_sample.iloc[idx]
-        actual = float(y_true_sample[idx])
-        pred = float(preds_sample[idx])
-        err = float(residuals[idx])
-        irr = float(row.get("irradiance_wm2", 0.0))
-        temp = float(row.get("temp_c", 0.0))
-        inv_id = str(row.get("inverter_id", "unknown"))
-        t_val = str(row.get("time", "-"))
-
-        # Physical diagnostic deduction
-        if irr > 750 and err > 20:
-            root_cause = "Rapid midday cloud transient: sharp irradiance drop not yet reflected in campus median PR"
-        elif temp > 32 and actual < pred:
-            root_cause = "Severe inverter thermal throttling under extreme ambient temperature exceeding nameplate envelope"
-        else:
-            root_cause = "Localized rooftop partial shading from adjacent campus architectural obstruction"
-
         failures.append({
             "rank": rank,
-            "timestamp": t_val,
-            "inverter_id": inv_id,
-            "actual_health": round(actual, 2),
-            "predicted_health": round(pred, 2),
-            "residual_error": round(err, 2),
-            "irradiance_wm2": round(irr, 1),
-            "temp_c": round(temp, 1),
-            "physical_root_cause": root_cause,
+            "timestamp": str(row.get("time", "-")),
+            "inverter_id": str(row.get("inverter_id", "unknown")),
+            "health_now": round(float(row.get("health_now", np.nan)), 2),
+            "actual_health_t_plus_1h": round(float(y_true_sample[idx]), 2),
+            "predicted_health": round(float(preds_sample[idx]), 2),
+            "residual_error": round(float(residuals[idx]), 2),
+            "irradiance_wm2": round(float(row.get("irradiance_wm2", np.nan)), 1),
+            "temp_c": round(float(row.get("temp_c", np.nan)), 1),
+            "n_valid_5min": row.get("n_valid_5min", np.nan),
+            "power_missing": bool(pd.isna(row.get("ac_power_w", np.nan))),
         })
 
     failure_df = pd.DataFrame(failures)
@@ -431,8 +489,8 @@ def run_shap_explainability(
 
     print("\nTop 3 Worst Prediction Failures:")
     for f in failures:
-        print(f"  #{f['rank']} | Inverter: {f['inverter_id']} | Actual: {f['actual_health']} vs Pred: {f['predicted_health']} (Err: {f['residual_error']})")
-        print(f"     Diagnosis: {f['physical_root_cause']}")
+        print(f"  #{f['rank']} | Inverter: {f['inverter_id']} | Health(t): {f['health_now']} | "
+              f"Actual t+1h: {f['actual_health_t_plus_1h']} vs Pred: {f['predicted_health']} (Err: {f['residual_error']})")
 
     return failure_df
 
@@ -453,56 +511,52 @@ def run_xgb_experiment(
     print("EXECUTING STAGE 9 / TRACK T3: XGBOOST REGRESSION & CLASSIFICATION")
     print("=" * 70)
 
-    # 1. Splitting strictly via B2's framework
-    print("\n1. Partitioning dataset using B2's split_chronological()...")
-    train_df, val_df, test_df = split_chronological(dataset, time_col="time")
+    # 1. Forecasting dataset: features at t, target Health(t + 1 h)
+    print("\n1. Building forecasting dataset (features at t, target Health(t + 1 h))...")
+    forecast = build_forecast_dataset(dataset)
 
-    print("\n2. Partitioning unseen rooftop stations using B2's split_unseen_stations()...")
-    _, test_unseen = split_unseen_stations(dataset, station_col="inverter_id", time_col="time")
+    # 2. Splitting strictly via B2's framework (held-out inverters excluded from train/val)
+    print("\n2. Partitioning with B2's split_chronological() and split_unseen_stations()...")
+    splits = make_splits(forecast)
+    train_df, val_df, test_df, test_unseen = (splits[k] for k in ["train", "val", "test", "test_unseen"])
 
-    # 2. Extract feature matrices
-    X_train, y_reg_train, y_cls_train, _ = prepare_xgb_data(train_df)
-    X_val, y_reg_val, y_cls_val, _ = prepare_xgb_data(val_df)
-    X_test, y_reg_test, y_cls_test, test_clean = prepare_xgb_data(test_df)
-    X_unseen, y_reg_unseen, y_cls_unseen, _ = prepare_xgb_data(test_unseen)
+    # 3. Extract feature matrices, filled with training medians only
+    fill_values = train_fill_values(train_df)
+    X_train, y_reg_train, y_cls_train, _ = prepare_xgb_data(train_df, fill_values)
+    X_val, y_reg_val, y_cls_val, _ = prepare_xgb_data(val_df, fill_values)
+    X_test, y_reg_test, y_cls_test, test_clean = prepare_xgb_data(test_df, fill_values)
+    X_unseen, y_reg_unseen, y_cls_unseen, _ = prepare_xgb_data(test_unseen, fill_values)
 
-    print(f"\nFeature Matrices Prepared (13 Stage 7 Selected Features):")
+    print(f"\nFeature Matrices Prepared ({X_train.shape[1]} features: Stage 7 set + Health(t)):")
     print(f"  * Train  : {X_train.shape[0]:,} rows")
     print(f"  * Val    : {X_val.shape[0]:,} rows")
     print(f"  * Test   : {X_test.shape[0]:,} rows (All of 2023)")
     print(f"  * Unseen : {X_unseen.shape[0]:,} rows (~7 held-out stations)")
 
-    # 3. Hyperparameter Tuning (Stage 10)
+    # 4. Hyperparameter Tuning (Stage 10)
     if tune:
-        best_reg_params, _ = run_hyperparameter_tuning(train_df, val_df)
+        best_reg_params, _ = run_hyperparameter_tuning(train_df, val_df, fill_values=fill_values)
     else:
         best_reg_params = TUNED_REG_PARAMS
 
-    # 4. Train Tuned XGBRegressor
+    # 5. Train Tuned XGBRegressor
     print("\n3. Fitting Tuned xgb_regressor on full B2 training split...")
     xgb_reg = build_xgb_regressor(best_reg_params)
     t_reg_start = time.time()
-    xgb_reg.fit(
-        X_train,
-        y_reg_train,
-        eval_set=[(X_val, y_reg_val)],
-        verbose=False
-    )
+    xgb_reg.fit(X_train, y_reg_train, verbose=False)
     reg_train_time = time.time() - t_reg_start
     print(f"  * Fitted xgb_regressor in {reg_train_time:.1f}s")
 
-    # 5. Train Dedicated XGBClassifier (Method 1)
-    print("\n4. Fitting Dedicated xgb_classifier on full B2 training split...")
-    sample_weights = compute_sample_weights(y_cls_train)
+    # 6. Stage 5 balancing, then the Dedicated XGBClassifier (Method 1) with the winner
+    _, balancing = compare_balancing(X_train, y_cls_train, X_val, y_cls_val)
+    print(f"\n4. Fitting Dedicated xgb_classifier with {balancing} on full B2 training split...")
+    if balancing == "sample_weights":
+        X_cls_fit, y_cls_fit, sample_weights = X_train, y_cls_train, compute_sample_weights(y_cls_train)
+    else:
+        (X_cls_fit, y_cls_fit), sample_weights = undersample_healthy(X_train, y_cls_train), None
     xgb_cls = build_xgb_classifier(DEFAULT_CLS_PARAMS)
     t_cls_start = time.time()
-    xgb_cls.fit(
-        X_train,
-        y_cls_train,
-        sample_weight=sample_weights,
-        eval_set=[(X_val, y_cls_val)],
-        verbose=False
-    )
+    xgb_cls.fit(X_cls_fit, y_cls_fit, sample_weight=sample_weights, verbose=False)
     cls_train_time = time.time() - t_cls_start
     print(f"  * Fitted xgb_classifier in {cls_train_time:.1f}s")
 
@@ -520,6 +574,11 @@ def run_xgb_experiment(
     print(f"  * Val    RMSE: {reg_val_metrics['rmse']:.2f} | MAE: {reg_val_metrics['mae']:.2f} | R2: {reg_val_metrics['r2']:.3f}")
     print(f"  * Test   RMSE: {reg_test_metrics['rmse']:.2f} | MAE: {reg_test_metrics['mae']:.2f} | R2: {reg_test_metrics['r2']:.3f}")
     print(f"  * Unseen RMSE: {reg_unseen_metrics['rmse']:.2f} | MAE: {reg_unseen_metrics['mae']:.2f} | R2: {reg_unseen_metrics['r2']:.3f}")
+    # Persistence (Health(t+1h) = Health(t)) is the bar a forecaster must beat
+    persistence = {name: evaluate_regression(part["health_lead"], part["health_now"])["rmse"]
+                   for name, part in splits.items()}
+    print(f"  * Persistence RMSE  train {persistence['train']:.2f} | val {persistence['val']:.2f} | "
+          f"test {persistence['test']:.2f} | unseen {persistence['test_unseen']:.2f}")
 
     # 8. Evaluate Classification across all splits via B2 evaluate_classification
     print("\n6. Computing Final Classification Metrics (B2 Evaluation Framework)...")
@@ -548,7 +607,8 @@ def run_xgb_experiment(
             val_score=f"RMSE: {reg_val_metrics['rmse']:.2f}",
             test_score=f"RMSE: {reg_test_metrics['rmse']:.2f}",
             unseen_score=f"RMSE: {reg_unseen_metrics['rmse']:.2f}",
-            notes=f"Tuned depth={best_reg_params['max_depth']}, lr={best_reg_params['learning_rate']}, Stage 7 features ({reg_train_time:.1f}s)",
+            notes=f"Health(t+1h) forecast; depth={best_reg_params['max_depth']}, lr={best_reg_params['learning_rate']}, "
+                  f"Stage 7 features + Health(t) ({reg_train_time:.1f}s)",
         )
         log_experiment(
             student="B1",
@@ -558,7 +618,7 @@ def run_xgb_experiment(
             val_score=f"F1: {cls_val_metrics['macro_f1']:.2f}, Faulty recall: {cls_val_metrics['faulty_recall']:.2f}",
             test_score=f"F1: {cls_test_metrics['macro_f1']:.2f}, Faulty recall: {cls_test_metrics['faulty_recall']:.2f}",
             unseen_score=f"F1: {cls_unseen_metrics['macro_f1']:.2f}, Faulty recall: {cls_unseen_metrics['faulty_recall']:.2f}",
-            notes=f"Dedicated 3-Class Softmax, sample weights ({cls_train_time:.1f}s)",
+            notes=f"Status(t+1h) forecast; dedicated 3-class softmax, {balancing} (Stage 5 winner) ({cls_train_time:.1f}s)",
         )
 
     total_time = time.time() - start_time

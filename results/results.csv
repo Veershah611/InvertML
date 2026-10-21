@@ -8,12 +8,8 @@ timestamp,student,model,task,train_score,val_score,test_score,unseen_score,notes
 2026-10-19 15:47,B2,MLPRegressor,regression,RMSE: 2.15,RMSE: 3.45,RMSE: 4.76,RMSE: 5.04,"Trained in 37.2s, (64, 32) hidden layers, Adam, ReLU"
 2026-10-19 15:47,B2,MLPClassifier,classification,F1: 0.96,F1: 0.96,F1: 0.96,F1: 0.95,"Trained in 23.9s, Dedicated Softmax across Healthy, Warning, Faulty"
 2026-10-19 17:31,B2,IsolationForest (GPVS-Faults),anomaly_detection,-,-,"Recall: 0.68, F1: 0.72",-,"GPVS physical faults (open/short circuit). Precision: 0.77, FPR: 0.02"
-2026-10-20 21:11,B1,XGBRegressor (Tuned),regression,RMSE: 0.24,RMSE: 0.30,RMSE: 0.30,RMSE: 0.22,"Tuned depth=6, lr=0.03, Stage 7 features (0.6s)"
-2026-10-20 21:11,B1,XGBClassifier,classification,"F1: 1.00, Faulty recall: 1.00","F1: 1.00, Faulty recall: 1.00","F1: 1.00, Faulty recall: 1.00","F1: 1.00, Faulty recall: 0.00","Dedicated 3-Class Softmax, sample weights (1.0s)"
 2026-10-20 22:31,B2,IsolationForest (GPVS-Faults),anomaly_detection,-,-,"Recall: 0.68, F1: 0.72",-,"GPVS physical faults (open/short circuit). Precision: 0.77, FPR: 0.02"
 2026-10-20 22:50,B1/B2,IsolationForest (GPVS-Faults),anomaly_detection,-,-,"Recall: 0.68, F1: 0.72",-,"GPVS physical faults (open/short circuit). Precision: 0.77, FPR: 0.02"
-2026-10-20 22:54,B1,XGBRegressor (Tuned),regression,RMSE: 0.23,RMSE: 0.35,RMSE: 0.30,RMSE: 0.19,"Tuned depth=6, lr=0.03, Stage 7 features (0.7s)"
-2026-10-20 22:54,B1,XGBClassifier,classification,"F1: 1.00, Faulty recall: 1.00","F1: 1.00, Faulty recall: 1.00","F1: 1.00, Faulty recall: 1.00","F1: 1.00, Faulty recall: 0.00","Dedicated 3-Class Softmax, sample weights (1.1s)"
 2026-10-21 01:41,A2,RF tuned regression,regression,5.191,10.007,21.243,18.922,one-hour future target; balancing=class_weight; mean imputation
 2026-10-21 01:41,A2,RF tuned classification,classification,0.9097,0.6674,0.3825,0.2531,one-hour future target; balancing=class_weight; mean imputation
 2026-10-21 01:42,A2,RF default regression,regression,7.018,9.953,21.845,19.678,one-hour future target; balancing=class_weight; mean imputation
@@ -28,3 +24,5 @@ timestamp,student,model,task,train_score,val_score,test_score,unseen_score,notes
 2026-10-21 15:10,B2,MLPClassifier,classification,F1: 1.00,F1: 1.00,F1: 1.00,F1: 1.00,"Trained in 0.8s, Dedicated Softmax across Healthy, Warning, Faulty"
 2026-10-21 17:22,B2,MLPRegressor,regression,RMSE: 6.42,RMSE: 20.76,RMSE: 28.12,RMSE: 25.26,"Trained in 10.4s, (64, 32) hidden layers, Adam, ReLU"
 2026-10-21 17:22,B2,MLPClassifier,classification,F1: 0.68,F1: 0.51,F1: 0.19,F1: 0.26,"Trained in 3.1s, Dedicated Softmax across Healthy, Warning, Faulty"
+2026-10-21 17:54,B1,XGBRegressor (Tuned),regression,RMSE: 8.91,RMSE: 10.90,RMSE: 20.07,RMSE: 17.60,"Health(t+1h) forecast; depth=4, lr=0.05, Stage 7 features + Health(t) (3.9s)"
+2026-10-21 17:54,B1,XGBClassifier,classification,"F1: 0.68, Faulty recall: 0.77","F1: 0.67, Faulty recall: 0.73","F1: 0.51, Faulty recall: 0.45","F1: 0.43, Faulty recall: 0.35","Status(t+1h) forecast; dedicated 3-class softmax, sample_weights (Stage 5 winner) (11.2s)"
