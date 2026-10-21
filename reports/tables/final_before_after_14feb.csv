@@ -1,0 +1,15 @@
+model,period,n,rmse,macro_f1,faulty_recall
+A2 RF,before,34891,9.076,,
+A2 RF,after,331219,9.797,,
+A2 RF,before,34891,,0.7031,0.7679
+A2 RF,after,331219,,0.6018,0.5472
+A2 persistence,before,34891,10.909,,
+A2 persistence,after,331219,12.492,,
+B1 XGBoost,before,34984,10.455,,
+B1 XGBoost,after,334106,10.595,,
+B1 XGBoost,before,34984,,0.6744,0.8213
+B1 XGBoost,after,334106,,0.5524,0.619
+B2 MLP,before,34984,12.489,,
+B2 MLP,after,334106,11.94,,
+B2 MLP,before,34984,,0.6313,0.5395
+B2 MLP,after,334106,,0.5091,0.32
