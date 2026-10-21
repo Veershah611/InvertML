@@ -180,7 +180,7 @@ plt.savefig("reports/figures/b1_shap_waterfall.png")
 ### Task 7: Unsupervised Anomaly Detection (Shared with B2)
 
 * Partner B2 has already implemented and verified [`src/models/iforest.py`](src/models/iforest.py) on the GPVS-Faults physical benchmark.
-* **B1's Role:** Review the benchmark code, verify the **77.27% Precision** and **68.00% Recall** results on real hardware faults, and co-author the anomaly detection evaluation in Section 11 of the report.
+* **B1's Role:** Review the benchmark code and co-author the anomaly detection evaluation in Section 11 of the report. *Update 2026-10-21:* the earlier 77.27% precision / 68.00% recall came from synthetic fallback data; on the real GPVS-Faults files the detector reaches precision 100%, recall 38.96%, F1 0.56 (`reports/Section_09_10_XGBoost.md`, section 11.4).
 
 ---
 

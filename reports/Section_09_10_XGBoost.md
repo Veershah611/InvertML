@@ -199,18 +199,24 @@ From [`reports/tables/b1_xgb_failure_cases.csv`](tables/b1_xgb_failure_cases.csv
 
 As part of the joint Pair B deliverable (B1/B2), unsupervised anomaly detection was verified using an **Isolation Forest** pipeline on the real-world **GPVS-Faults physical benchmark dataset** ([`src/models/iforest.py`](../src/models/iforest.py)).
 
+> **Correction (2026-10-21).** The earlier GPVS result (68% recall, 77% precision, "1,000 healthy states and 100 faults") came from synthetic fallback data: the loader silently generated mock data when `data/raw/GPVS-Faults/` was missing. The real dataset has now been downloaded and the loader raises an error instead of falling back. The numbers below are from the real files.
+
 ### 11.4.1 Real Hardware Fault Benchmark Setup
-Unlike synthetic fault injection, GPVS-Faults consists of actual physical laboratory experiments including **open-circuit string disconnections, line-line short circuits, and localized shading**. The dataset contains 1,000 healthy operating states and 100 physical hardware faults (contamination rate $\approx 9.1\%$).
+GPVS-Faults (Bakdi et al., Mendeley Data, CC BY 4.0) has 16 laboratory experiments of about 7-14 s at about 10 kHz: two fault-free runs (F0L, F0M) and seven fault types (F1-F7), each in IPPT (L) and MPPT (M) mode. Faults are introduced halfway through each run.
+
+* **Windows:** 0.1 s (5 grid cycles); features are mean/std/min/max of Ipv, Vpv and Vdc and the RMS of the six phase currents and voltages (18 features, 1,979 windows).
+* **Labels:** F0 windows are normal; in F1-F7 the first 45% of each run is normal, the last 45% is fault, and the uncertain middle 10% is dropped.
+* **Protocol (unsupervised):** the Isolation Forest (200 trees, contamination 0.05) is fitted on normal windows only: the first 70% of F0L/F0M and the normal halves of the fault runs. It is tested on the last 30% of F0L/F0M (86 normal windows) and all 847 fault windows.
 
 ### 11.4.2 Benchmark Results & Detection Analysis
 
-* **Detection Recall (TPR):** **$68.00\%$** (Caught 17 of 25 test physical faults).
-* **Precision:** **$77.27\%$** (High confidence; only 5 false alarms out of 250 normal points).
-* **F1-Score:** **$0.7234$**
-* **False Alarm Rate (FPR):** **$2.00\%$** (Extremely clean operational baseline).
-* **Execution Latency:** **$0.09\text{ seconds}$**.
+* **Detection Recall (TPR):** **38.96%** (330 of 847 fault windows).
+* **Precision:** **100%**; **False Alarm Rate:** **0%** (0 of 86 held-out normal windows flagged).
+* **F1-Score:** **0.5607**.
+* **By fault type** (`reports/tables/gpvs_iforest_by_scenario.csv`): F5 is caught in every window in both modes; F1 and F2 in MPPT mode about 87%, F4 in IPPT mode 75%; F6 and F7 almost never (0-6%). The dataset authors note that low-magnitude faults are hard to detect under MPPT/IPPT control, which matches this pattern.
+* **Caveat:** only 86 normal windows are held out, so the 0% false-alarm rate has wide uncertainty.
 
-The dual evaluation figure ([`reports/figures/b1_iforest_gpvs_detection.png`](figures/b1_iforest_gpvs_detection.png)) illustrates clear multimodal separation between healthy telemetry and severe physical anomalies along the decision function score.
+The figure ([`reports/figures/b1_iforest_gpvs_detection.png`](figures/b1_iforest_gpvs_detection.png)) shows the anomaly-score distributions and the confusion matrix.
 
 ---
 
@@ -226,7 +232,7 @@ Final rows in `results/results.csv` after the 2026-10-21 re-run on the corrected
 | T2 | A2 | Random Forest | **9.91** | **9.73** | **9.07** | **0.61** | 0.57 |
 | **T3** | **B1** | **XGBoost (tuned)** | 11.38 | 10.58 | 9.90 | 0.56 | 0.64 |
 | T4 | B2 | MLP | 13.71 | 11.99 | 14.02 | 0.52 | 0.34 |
-| T5 | B1 / B2 | Isolation Forest (GPVS-Faults) | — | — | — | Recall 0.68, F1 0.72 | — |
+| T5 | B1 / B2 | Isolation Forest (GPVS-Faults, real data) | — | — | — | Recall 0.39, F1 0.56 | — |
 
 ### Conclusions
 1. **Every supervised model beats persistence on the 2023 test year** once the target is corrected. A2's Random Forest is the strongest regressor on validation and test.

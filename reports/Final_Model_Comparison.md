@@ -58,10 +58,11 @@ All classifiers use their Stage 5 winning balancing strategy: class weights (Log
 | HKUST injected faults (A1, A2) | A2 inputs, tuned (0.01, 200) | 18.2% | 0.7% | 0.083 / 0.114 |
 | HKUST injected faults (A1, A2) | **+ peer deviation, tuned (0.01, 400)** | 31.4% | **0.6%** | **0.156 / 0.209** |
 | HKUST injected faults (A1, A2) | + peer deviation, A2 settings | **65.7%** | 3.9% | 0.056 / 0.102 |
-| GPVS-Faults, real lab faults (B1, B2) | Isolation Forest | 68% | 2% | 0.77 / 0.72 |
+| GPVS-Faults, real lab faults (B1, B2) | Isolation Forest, normal-only training | 39.0% | 0% (86 windows) | 1.00 / 0.56 |
 
 * On HKUST, adding peer deviation now improves every setting. Before the irradiance correction, it caused false alarms after 14 Feb (up to 64%), because the benchmark selected "normal" rows with the shifted labels.
 * Precision on HKUST stays low because only 137 test rows are injected faults, about 1% of the benchmark rows. The detector is a label-free cross-check, not the main alarm.
+* On the real GPVS-Faults data the detector never raised a false alarm on held-out normal windows and caught 39% of fault windows: fault type F5 always, F6 and F7 almost never (`reports/tables/gpvs_iforest_by_scenario.csv`). An earlier result of 68% recall came from synthetic fallback data and has been replaced.
 
 ## 5. Final recommendation
 

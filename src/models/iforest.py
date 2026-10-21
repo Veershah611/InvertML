@@ -25,7 +25,6 @@ import seaborn as sns
 from sklearn.ensemble import IsolationForest
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import (
     precision_score,
     recall_score,
@@ -35,7 +34,8 @@ from sklearn.metrics import (
 )
 
 from src.evaluate import (
-    load_gpvs_faults,
+    gpvs_feature_columns,
+    load_gpvs_windows,
     evaluate_fault_detection,
     log_experiment,
 )
@@ -176,86 +176,94 @@ def plot_gpvs_anomaly_results(y_test, raw_preds, scores, metrics, save_path=None
 # 3. Task 5: GPVS-Faults Real Fault Benchmark (Pair B Core Task)
 # ===========================================================================
 
-def run_gpvs_experiment(test_size=0.25, random_state=42, save_plot=True):
-    """Train Isolation Forest and evaluate on the GPVS-Faults real benchmark."""
+TRAIN_NORMAL_SHARE = 0.70   # first 70% (in time) of the fault-free files is used for training
+CONTAMINATION = 0.05
+
+
+def split_gpvs(windows):
+    """Unsupervised protocol: train on normal windows only, test on unseen ones.
+
+    Train: F0L/F0M windows in the first 70% of each file, plus the normal
+    first halves of the fault files. Test: the last 30% of F0L/F0M (normal)
+    and every fault window of F1-F7.
+    """
+    f0 = windows["fault_type"].eq(0)
+    early = windows["position"] < TRAIN_NORMAL_SHARE
+    train = windows[(f0 & early) | (~f0 & windows["is_fault"].eq(0))]
+    test = windows[(f0 & ~early) | windows["is_fault"].eq(1)]
+    return train, test
+
+
+def run_gpvs_experiment(random_state=42, save_plot=True, log=False):
+    """Train Isolation Forest on normal GPVS-Faults windows and evaluate on real faults."""
     print("\n" + "=" * 65)
     print("TASK 5: UNSUPERVISED ANOMALY DETECTION ON GPVS-FAULTS (REAL FAULTS)")
     print("=" * 65)
 
     start_time = time.time()
 
-    # 1. Load real physical faults
-    print("Loading GPVS-Faults dataset...")
-    X, y = load_gpvs_faults()
-    print(f"Dataset shape: {X.shape}")
-    print(f"Features: {list(X.columns)}")
-    print(f"Class distribution -> Healthy (0): {(y == 0).sum():,}, Faults (1): {(y == 1).sum():,}")
+    # 1. Load real laboratory data as 0.1 s windows (raises if not downloaded)
+    print("Loading GPVS-Faults windows...")
+    windows = load_gpvs_windows()
+    features = gpvs_feature_columns(windows)
+    train, test = split_gpvs(windows)
+    print(f"Windows: {len(windows):,} ({windows['is_fault'].sum():,} fault) from "
+          f"{windows['scenario'].nunique()} scenario files; {len(features)} features")
+    print(f"Train (normal only): {len(train):,} | Test: {len(test):,} "
+          f"({int(test['is_fault'].sum()):,} fault, {int((test['is_fault'] == 0).sum()):,} normal)")
 
-    # Estimate contamination from ground truth
-    contamination = float((y == 1).sum() / len(y))
-    contamination = max(0.01, min(0.20, contamination))
-    print(f"Estimated fault contamination rate: {contamination:.3f}")
+    # 2. Fit on normal windows only (no labels used)
+    model = build_isolation_forest(n_estimators=200, contamination=CONTAMINATION,
+                                   random_state=random_state)
+    model.fit(train[features])
 
-    # 2. Stratified train/test split
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y,
-        test_size=test_size,
-        random_state=random_state,
-        stratify=y,
-    )
-
-    # 3. Train IsolationForest (unsupervised)
-    print("\nFitting IsolationForest on training telemetry...")
-    model = build_isolation_forest(
-        n_estimators=100,
-        contamination=contamination,
-        random_state=random_state,
-    )
-    model.fit(X_train)
-
-    # 4. Predict on test set
-    raw_preds = model.predict(X_test)
+    # 3. Predict on held-out windows
+    raw_preds = model.predict(test[features])
     scores = model.named_steps["iforest"].decision_function(
-        model.named_steps["scaler"].transform(X_test)
+        model.named_steps["scaler"].transform(test[features])
     )
-
-    # 5. Evaluate metrics
-    metrics = evaluate_anomalies(y_test, raw_preds)
+    metrics = evaluate_anomalies(test["is_fault"], raw_preds)
     elapsed = time.time() - start_time
 
+    # 4. Detection rate per fault scenario
+    flagged = pd.Series(raw_preds == -1, index=test.index)
+    per_scenario = (test.assign(flagged=flagged)
+                    .groupby(["scenario", "fault_type", "mode", "is_fault"])["flagged"]
+                    .agg(windows="size", flagged_share="mean").reset_index())
+    per_scenario["flagged_share"] = per_scenario["flagged_share"].round(4)
+    per_scenario.to_csv(ROOT / "reports" / "tables" / "gpvs_iforest_by_scenario.csv", index=False)
+
     print("\n" + "-" * 50)
-    print("GPVS-FAULTS TEST RESULTS (REAL PHYSICAL FAULTS)")
+    print("GPVS-FAULTS TEST RESULTS (REAL LABORATORY FAULTS)")
     print("-" * 50)
     print(f"Fault Detection Recall (TPR):  {metrics['recall']:.2%}")
     print(f"Precision:                    {metrics['precision']:.2%}")
     print(f"F1-Score:                     {metrics['f1']:.4f}")
     print(f"False Alarm Rate (FPR):        {metrics['false_alarm_rate']:.2%}")
-    print(f"True Positives (Faults caught):{metrics['tp']}")
-    print(f"False Negatives (Missed):      {metrics['fn']}")
+    print(f"Confusion: TN={metrics['tn']}, FP={metrics['fp']}, FN={metrics['fn']}, TP={metrics['tp']}")
     print(f"Execution Time:               {elapsed:.2f}s")
-    print("-" * 50)
-    print("Confusion Matrix:")
-    print(f"[[TN={metrics['tn']}, FP={metrics['fp']}],")
-    print(f" [FN={metrics['fn']}, TP={metrics['tp']}]]")
+    print(per_scenario.to_string(index=False))
     print("-" * 50)
 
-    # 6. Save visualization plot
+    # 5. Save visualization plot
     if save_plot:
         plot_path = ROOT / "reports" / "figures" / "b1_iforest_gpvs_detection.png"
-        plot_gpvs_anomaly_results(y_test, raw_preds, scores, metrics, save_path=plot_path)
+        plot_gpvs_anomaly_results(test["is_fault"].to_numpy(), raw_preds, scores, metrics, save_path=plot_path)
 
-    # 7. Log to results/results.csv
-    log_experiment(
-        student="B1/B2",
-        model_name="IsolationForest (GPVS-Faults)",
-        task="anomaly_detection",
-        train_score="-",
-        val_score="-",
-        test_score=f"Recall: {metrics['recall']:.2f}, F1: {metrics['f1']:.2f}",
-        unseen_score="-",
-        notes=f"GPVS physical faults (open/short circuit). Precision: {metrics['precision']:.2f}, FPR: {metrics['false_alarm_rate']:.2f}",
-    )
-    print("Results logged to results/results.csv successfully.")
+    # 6. Log to results/results.csv (final run only)
+    if log:
+        log_experiment(
+            student="B1/B2",
+            model_name="IsolationForest (GPVS-Faults)",
+            task="anomaly_detection",
+            train_score="-",
+            val_score="-",
+            test_score=f"Recall: {metrics['recall']:.2f}, F1: {metrics['f1']:.2f}",
+            unseen_score="-",
+            notes=(f"Real GPVS-Faults lab data, 0.1 s windows, trained on normal windows only; "
+                   f"Precision: {metrics['precision']:.2f}, FPR: {metrics['false_alarm_rate']:.2f}"),
+        )
+        print("Results logged to results/results.csv successfully.")
 
     return model, metrics
 
@@ -270,7 +278,7 @@ if __name__ == "__main__":
     print("=" * 65)
 
     # Run GPVS-Faults real physical fault benchmark (Pair B core task)
-    model, gpvs_metrics = run_gpvs_experiment()
+    model, gpvs_metrics = run_gpvs_experiment(log="--log" in sys.argv)
 
     print("\n" + "=" * 65)
     print("Isolation Forest Execution Completed!")

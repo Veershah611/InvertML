@@ -1,5 +1,4 @@
 timestamp,student,model,task,train_score,val_score,test_score,unseen_score,notes
-2026-10-20 22:50,B1/B2,IsolationForest (GPVS-Faults),anomaly_detection,-,-,"Recall: 0.68, F1: 0.72",-,"GPVS physical faults (open/short circuit). Precision: 0.77, FPR: 0.02"
 2026-10-21 19:05,A2,RF default regression,regression,RMSE: 7.01,RMSE: 9.91,RMSE: 9.73,RMSE: 9.07,one-hour future target; balancing=class_weight; mean imputation
 2026-10-21 19:05,A2,RF default classification,classification,"F1: 0.81, Faulty recall: 0.94","F1: 0.65, Faulty recall: 0.62","F1: 0.61, Faulty recall: 0.57","F1: 0.50, Faulty recall: 0.33",one-hour future target; balancing=class_weight; mean imputation
 2026-10-21 19:13,A1,Persistence,regression,RMSE: 12.11,RMSE: 13.04,RMSE: 12.30,RMSE: 10.73,"Health(t+1h) = Health(t); B1 target, forecasting t+1h; test before/after 14 Feb: RMSE: 10.89 / RMSE: 12.44"
@@ -12,3 +11,4 @@ timestamp,student,model,task,train_score,val_score,test_score,unseen_score,notes
 2026-10-21 19:14,B1,XGBClassifier,classification,"F1: 0.62, Faulty recall: 0.77","F1: 0.60, Faulty recall: 0.65","F1: 0.56, Faulty recall: 0.64","F1: 0.41, Faulty recall: 0.42","Status(t+1h) forecast; dedicated 3-class softmax, sample_weights (Stage 5 winner) (10.7s)"
 2026-10-21 19:16,B2,MLPRegressor,regression,RMSE: 8.65,RMSE: 13.71,RMSE: 11.99,RMSE: 14.02,"Health(t+1h) forecast; hidden=(100, 50), Adam, ReLU; 60,000 random train rows (18.3s)"
 2026-10-21 19:16,B2,MLPClassifier,classification,"F1: 0.68, Faulty recall: 0.62","F1: 0.57, Faulty recall: 0.41","F1: 0.52, Faulty recall: 0.34","F1: 0.39, Faulty recall: 0.21","Status(t+1h) forecast; dedicated classifier (Method 1, undersampling), Stage 5 winner"
+2026-10-21 19:41,B1/B2,IsolationForest (GPVS-Faults),anomaly_detection,-,-,"Recall: 0.39, F1: 0.56",-,"Real GPVS-Faults lab data, 0.1 s windows, trained on normal windows only; Precision: 1.00, FPR: 0.00"

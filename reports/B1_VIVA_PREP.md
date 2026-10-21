@@ -20,7 +20,7 @@
 > 4. *Designed the collinearity pruning pipeline ($r > 0.85$) while strictly protecting critical physical indicators.*
 > 5. *Built, hyperparameter-tuned, and evaluated the **XGBoost** suite (Track T3), forecasting health one hour ahead. It reaches validation RMSE 11.38 (persistence 13.04), test RMSE 10.58 (persistence 12.30) and test Faulty recall 0.64; I also found and fixed a target leakage in my first version.*
 > 6. *Explained the model's inner workings using **Tree-SHAP** global beeswarm and local waterfall attributions, diagnosing top prediction failure residuals.*
-> 7. *Co-validated the **Isolation Forest** pipeline on the real-world **GPVS-Faults** hardware benchmark (achieving $77.3\%$ Precision and $68.0\%$ Recall)."*
+> 7. *Co-validated the **Isolation Forest** pipeline on the real **GPVS-Faults** laboratory benchmark (precision 100%, recall 39%, F1 0.56; it catches some fault types reliably and misses low-magnitude ones)."*
 
 ---
 
@@ -167,8 +167,9 @@
   * While Pair A evaluated unsupervised models on synthetically injected faults, Pair B (B1 and B2) focused on real-world physical laboratory faults using the **GPVS-Faults benchmark dataset**.
   * Synthetic faults often carry idealized mathematical artifacts (e.g. Gaussian additive noise or uniform scaling) that tree models trivial to detect. In contrast, GPVS-Faults contains actual physical hardware anomalies: line-to-line short circuits, high-impedance series faults, and open-circuit string disconnections.
   * In [`src/models/iforest.py`](../src/models/iforest.py), we implemented an **Isolation Forest** pipeline with `StandardScaler`:
-    * Trained purely unsupervised on healthy operational telemetry (contamination estimated at $9.1\%$).
-    * Evaluated on held-out physical faults, achieving **$77.27\%$ Precision**, **$68.00\%$ Fault Recall**, and an **F1-score of $0.7234$** with only a **$2.00\%$ False Alarm Rate**.
+    * Built 0.1 s windows of the electrical signals and trained purely unsupervised on normal windows (contamination 0.05).
+    * Evaluated on held-out windows of the real files: **precision 100%**, **recall 38.96%**, **F1 0.56**, **0% false alarms** (86 normal test windows). Fault type F5 is always caught; F6 and F7 are almost never caught.
+    * **Honest note for the viva:** an earlier version reported 68% recall; that came from synthetic fallback data generated when the real files were missing. The loader now refuses to run without the real data.
   * I created the visual diagnostic tool ([`reports/figures/b1_iforest_gpvs_detection.png`](figures/b1_iforest_gpvs_detection.png)) displaying the anomaly score KDE distributions and confusion matrix.
 
 ---

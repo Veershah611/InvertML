@@ -67,7 +67,7 @@ To maintain rigorous engineering standards, the following technical, dataset, an
 * **Constraint:** The HKUST primary dataset does not include physical maintenance logs, technician work orders, or ground-truth failure records.
 * **Mitigation via Dual-Dataset Strategy:**
   1. Primary labels were mathematically engineered using standard physical PV derating ($0.78$ factor, Option A forecasting target).
-  2. To prove the machine learning models detect **real hardware faults**, the team evaluated **Isolation Forest on the GPVS-Faults dataset** (Mendeley Data), achieving **0.68 Recall and 0.72 F1-Score** on real laboratory open-circuit, short-circuit, and inverter disconnection faults.
+  2. To prove the machine learning models detect **real hardware faults**, the team evaluated **Isolation Forest on the GPVS-Faults dataset** (Mendeley Data), achieving **0.39 Recall, 1.00 Precision and 0.56 F1-Score** on the real laboratory fault scenarios (0.1 s windows, trained on normal windows only). Detection ranges from 100% (fault F5) to almost 0% (faults F6 and F7), so it catches some fault types reliably and misses low-magnitude ones. (An earlier figure of 0.68 recall / 0.72 F1 came from synthetic fallback data, not the real files.)
 
 ### 4. Absence of DC Telemetry and Module Temperature
 * **Constraint:** The dataset package contains only AC-side measurements (`ac_power_w`, line currents, voltages) and ambient air temperature. Panel-level DC current, DC power, and panel module temperatures are not provided.
