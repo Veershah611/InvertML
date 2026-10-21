@@ -1,0 +1,5 @@
+season,n,ridge_mae,ridge_rmse,persistence_mae,persistence_rmse,logistic_macro_f1,logistic_faulty_recall,rule_health_macro_f1,rule_health_faulty_recall,rule_peer_macro_f1,rule_peer_faulty_recall,faulty_share
+Autumn (SON),108460,12.08,16.361,9.687,14.389,0.5123,0.8148,0.6229,0.7897,0.2603,0.3129,0.4538
+Spring (MAM),113388,13.7,17.359,10.776,15.696,0.4695,0.6058,0.5896,0.7685,0.1351,0.1077,0.5595
+Summer (JJA),150776,15.719,20.178,14.776,20.499,0.4589,0.6964,0.5128,0.7406,0.1724,0.1214,0.5633
+Winter (DJF),92052,8.508,13.062,6.739,12.212,0.6424,0.7978,0.7681,0.8206,0.426,0.3889,0.2718
