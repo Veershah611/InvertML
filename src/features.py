@@ -72,6 +72,11 @@ B1_CORE_FEATURES = [
     "temp_delta_stc",
 ]
 
+A1_OUTAGE_FEATURES = ["is_offline", "minutes_offline_24h"]
+A1_OUTAGE_WINDOW = "24h"
+A1_DAYLIGHT_WM2 = CONFIG.get("daylight_irradiance_wm2", 50)
+A1_BIN_MINUTES = 15
+
 A2_HISTORY_SOURCES = ["performance_ratio", "peer_dev_campus"]
 A2_LAG_STEPS = {"15m": pd.Timedelta("15min"),
                 "1h": pd.Timedelta("1h"), "1d": pd.Timedelta("1d")}
@@ -474,6 +479,40 @@ def add_a2_history_features(df, inverter_col="inverter_id", time_col="time"):
     for col in A2_HISTORY_FEATURES:
         ordered[col] = ordered[col].astype("float32")
     return ordered.sort_values("_a2_position").drop(columns="_a2_position").set_axis(df.index)
+
+
+def add_a1_outage_features(df, inverter_col="inverter_id", time_col="time"):
+    """Offline flag and minutes offline in the 24 clock hours before t (A1).
+
+    is_offline follows A2's rule in src/preprocess.py: AC power missing or no
+    valid 5-min reading in the bin. minutes_offline_24h counts offline bins in
+    [t - 24 h, t), excluding t itself, times 15 min, and only bins with
+    irradiance >= daylight_irradiance_wm2 (config), so inverters asleep at dawn
+    are not counted as outages. Loggers record daytime only, so the night
+    contributes no bins. Run on the full logger grid before any daylight
+    filtering or chronological split, so history is not cut off.
+    """
+    required = {inverter_col, time_col, "ac_power_w", "irradiance_wm2"}
+    if missing := required.difference(df.columns):
+        raise ValueError(f"Missing A1 outage inputs: {sorted(missing)}")
+    out = df.copy()
+    out[time_col] = pd.to_datetime(out[time_col])
+    if out.duplicated([inverter_col, time_col]).any():
+        raise ValueError("Duplicate inverter/timestamp rows in A1 outage features")
+    offline = out["ac_power_w"].isna()
+    if "n_valid_5min" in out:
+        offline |= out["n_valid_5min"].eq(0)
+    out["is_offline"] = offline.astype("int8")
+    daylight_offline = (offline & out["irradiance_wm2"].ge(A1_DAYLIGHT_WM2)).astype("float32")
+    out["minutes_offline_24h"] = np.float32(0)
+    for _, group in out.groupby(inverter_col, sort=False, observed=True):
+        series = pd.Series(daylight_offline.loc[group.index].to_numpy(),
+                           index=group[time_col]).sort_index()
+        past = series.rolling(A1_OUTAGE_WINDOW, closed="left").sum().fillna(0)
+        out.loc[group.index, "minutes_offline_24h"] = (
+            past.reindex(group[time_col]).to_numpy() * A1_BIN_MINUTES)
+    out["minutes_offline_24h"] = out["minutes_offline_24h"].astype("float32")
+    return out
 
 
 def build_all_features(
