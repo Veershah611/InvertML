@@ -1,0 +1,13 @@
+model,split,n,mae,rmse,r2
+Persistence,train,270448,4.95,12.135,0.692
+Persistence,val,190158,6.108,12.924,0.718
+Persistence,test,464676,11.02,16.563,0.545
+Persistence,test_before_14feb,35860,4.227,10.878,0.789
+Persistence,test_after_14feb,428816,11.588,16.952,0.487
+Persistence,test_unseen,46980,11.542,17.139,0.441
+Ridge,train,270448,5.655,10.833,0.755
+Ridge,val,190158,6.666,11.858,0.762
+Ridge,test,464676,12.907,17.335,0.502
+Ridge,test_before_14feb,35860,6.153,11.19,0.776
+Ridge,test_after_14feb,428816,13.472,17.753,0.437
+Ridge,test_unseen,46980,11.171,15.977,0.514
