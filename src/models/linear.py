@@ -30,7 +30,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 from src.evaluate import CONFIG, evaluate_classification, evaluate_regression, log_experiment
-from src.features import B2_ALL_FEATURES, build_b2_features
+from src.features import A1_OUTAGE_FEATURES, B2_ALL_FEATURES, add_a1_outage_features, build_b2_features
 from src.targets import assign_operational_status, compute_health_score
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -45,7 +45,7 @@ VAL_END = pd.Timestamp(CONFIG["split"]["val_end"]) + pd.Timedelta("1D")
 CLASSES = ["Healthy", "Warning", "Faulty"]
 
 WEATHER_FEATURES = ["irradiance_wm2", "temp_c", "rh_pct", "wind_speed_ms"]
-FEATURES = ["health_now", "n_valid_5min"] + WEATHER_FEATURES + B2_ALL_FEATURES
+FEATURES = ["health_now", "n_valid_5min"] + WEATHER_FEATURES + B2_ALL_FEATURES + A1_OUTAGE_FEATURES
 
 LOAD_COLUMNS = ["inverter_id", "time", "ac_power_w", "n_valid_5min", "capacity_kwp",
                 "tilt_deg", "azimuth", "altitude_m"] + WEATHER_FEATURES
@@ -59,11 +59,13 @@ def build_dataset(path=PROCESSED / "hkust_15min_v1.parquet"):
     The lead is taken on the full 15-min grid and kept only when the row 4 bins
     ahead is exactly 1 hour later (same day), so "+1 h" never jumps overnight.
     Rows where Health(t) or Health(t+1h) is undefined (irradiance < 100 W/m2,
-    B1's daylight rule) are dropped.
+    B1's daylight rule) are dropped. Outage features are computed on the full
+    grid first, so their 24 h history includes rows dropped here.
     """
     df = pd.read_parquet(path, columns=LOAD_COLUMNS)
     df["inverter_id"] = df["inverter_id"].astype(str)
     df = df.sort_values(["inverter_id", "time"]).reset_index(drop=True)
+    df = add_a1_outage_features(df)
 
     df = compute_health_score(df)           # B1's target, unchanged
     df = df.rename(columns={"health_score": "health_now"})

@@ -13,7 +13,8 @@ section 11.2 diagnostics:
 
 Seasons are meteorological: DJF winter, MAM spring, JJA summer, SON autumn.
 
-Run from the repo root:  python -m src.models.linear_evaluation
+Run from the repo root:  python -m src.models.linear_evaluation          (no logging)
+                         python -m src.models.linear_evaluation --log    (final A1 rows to results.csv)
 """
 import json
 from itertools import product
@@ -23,9 +24,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from sklearn.dummy import DummyClassifier
 from sklearn.metrics import average_precision_score, confusion_matrix, f1_score
 
-from src.evaluate import evaluate_classification, evaluate_regression
+from src.evaluate import evaluate_classification, evaluate_regression, log_experiment
 from src.features import add_peer_deviation_features
 from src.models.linear import (CLASSES, PROCESSED, ROOT, TABLES, build_dataset,
                                fill_from_train, fit_logistic, fit_ridge, split)
@@ -137,7 +139,33 @@ def plot_residuals(parts, ridge_pred, path):
 
 # ---------------------------------------------------------------- run
 
-def run():
+def regression_table(parts, reg_preds):
+    rows = []
+    for model, pred in reg_preds.items():
+        for name, part in parts.items():
+            m = evaluate_regression(part["health_lead"], pred[name])
+            rows.append({"model": model, "split": name, "n": m["n_samples"],
+                         "mae": m["mae"], "rmse": m["rmse"], "r2": m["r2"]})
+    return pd.DataFrame(rows)
+
+
+def log_results(regression, classifiers, notes):
+    """One final row per A1 model in the shared results/results.csv."""
+    for task, table in [("regression", regression), ("classification", classifiers)]:
+        for model, r in table.groupby("model", sort=False):
+            r = r.set_index("split")
+            if task == "regression":
+                fmt = lambda s: f"RMSE: {r.loc[s, 'rmse']:.2f}"
+            else:
+                fmt = lambda s: f"F1: {r.loc[s, 'macro_f1']:.2f}, Faulty recall: {r.loc[s, 'faulty_recall']:.2f}"
+            log_experiment(student="A1", model_name=model, task=task,
+                           train_score=fmt("train"), val_score=fmt("val"), test_score=fmt("test"),
+                           unseen_score=fmt("test_unseen"),
+                           notes=f"{notes[model]}; test before/after 14 Feb: "
+                                 f"{fmt('test_before_14feb')} / {fmt('test_after_14feb')}")
+
+
+def run(log=False):
     data = add_peer_deviation(build_dataset())
     data["season"] = data["time"].dt.month.map(SEASONS)
     parts = split(data)
@@ -154,13 +182,17 @@ def run():
     print("Tuning peer-deviation rule cut-offs on train ...")
     warn_cut, fault_cut, rule_grid = tune_peer_rule(train)
     print(f"  Warning below {warn_cut}, Faulty below {fault_cut}")
+    majority = DummyClassifier(strategy="most_frequent").fit(X_train, train["status_lead"])
 
     faulty = list(logit.best_estimator_.classes_).index("Faulty")
-    preds = {"Logistic Regression": {}, "Rule: status of Health(t)": {}, "Rule: peer deviation": {}}
+    preds = {"Majority class": {}, "Rule: status of Health(t)": {}, "Rule: peer deviation": {},
+             "Logistic Regression": {}}
     scores = {model: {} for model in preds}
     ridge_pred, persist_pred = {}, {}
     for name, part in parts.items():
         peer = part["peer_dev_campus"].to_numpy(dtype=float)
+        preds["Majority class"][name] = majority.predict(X[name])
+        scores["Majority class"][name] = np.zeros(len(part))
         preds["Logistic Regression"][name] = logit.predict(X[name])
         scores["Logistic Regression"][name] = logit.predict_proba(X[name])[:, faulty]
         preds["Rule: status of Health(t)"][name] = part["status_now"].to_numpy()
@@ -172,6 +204,7 @@ def run():
         persist_pred[name] = part["health_now"].to_numpy()
 
     classifiers = classifier_table(parts, preds, scores)
+    regression = regression_table(parts, {"Persistence": persist_pred, "Ridge": ridge_pred})
     test = parts["test"]
     reg = {"ridge": ridge_pred["test"], "persistence": persist_pred["test"]}
     cls = {"logistic": preds["Logistic Regression"]["test"],
@@ -186,16 +219,32 @@ def run():
     TABLES.mkdir(parents=True, exist_ok=True)
     FIGURES.mkdir(parents=True, exist_ok=True)
     classifiers.to_csv(TABLES / "a1_eval_classifiers.csv", index=False)
+    regression.to_csv(TABLES / "a1_eval_regression.csv", index=False)
     season.to_csv(TABLES / "a1_eval_by_season.csv", index=False)
     station.to_csv(TABLES / "a1_eval_by_inverter.csv", index=False)
     rule.to_csv(TABLES / "a1_peer_rule.csv", index=False)
     plot_residuals(parts, ridge_pred, FIGURES / "a1_ridge_residuals.png")
-    return {"classifiers": classifiers, "season": season, "station": station, "rule": rule}
+    if log:
+        features = "18 features incl. outage"
+        log_results(regression, classifiers, {
+            "Persistence": "Health(t+1h) = Health(t); B1 target, forecasting t+1h",
+            "Ridge": f"alpha={ridge.best_params_['model__alpha']}; 5-fold TimeSeriesSplit; {features}",
+            "Majority class": "always predicts the most frequent training class",
+            "Rule: status of Health(t)": "status at t+1h = status implied by Health(t)",
+            "Rule: peer deviation": f"peer_dev_campus at t, Warning < {warn_cut}, Faulty < {fault_cut} "
+                                    "(tuned on train); offline = Faulty",
+            "Logistic Regression": f"C={logit.best_params_['model__C']}; class_weight=balanced "
+                                   f"(Stage 5 winner); {features}",
+        })
+    return {"classifiers": classifiers, "regression": regression, "season": season,
+            "station": station, "rule": rule}
 
 
 if __name__ == "__main__":
-    out = run()
+    import sys
+    out = run(log="--log" in sys.argv)
     pd.set_option("display.width", 250)
+    print(out["regression"].to_string(index=False), "\n")
     print(out["classifiers"].drop(columns="confusion_matrix").to_string(index=False), "\n")
     print(out["season"].to_string(index=False), "\n")
     print(out["station"].head(8).to_string(index=False))
