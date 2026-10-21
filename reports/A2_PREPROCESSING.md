@@ -13,7 +13,7 @@ The workspace includes upstream commit `876302c`, which incorporates B1's
 `7660e70` Stage 7 feature changes. B1 did not change `src/targets.py` in this push:
 the target formula and 70/90 status thresholds below still apply.
 
-A2's forecast datasets now include all seven `B1_CORE_FEATURES`:
+A2's forecast datasets include all seven `B1_CORE_FEATURES`:
 `specific_yield`, `performance_ratio`, `peer_dev_campus`, `peer_dev_station`,
 `self_dev_30d`, `thermal_stress` and `temp_delta_stc`.
 
@@ -43,6 +43,14 @@ All seven B1 features remain candidates in A2. The 13-feature list in B1's
 upstream report is not treated as a universal fixed selection. Feature pruning
 for later model tuning must be fitted within each training fold, and any selected
 subset must be evaluated on validation data.
+
+On 21 October 2026, A2 added 18 exact-time lag and past-only rolling columns
+for performance ratio and campus peer deviation. The features use 15-minute,
+one-hour and one-day lags, plus 1-hour/4-hour/one-day means and standard
+deviations. One-day lag means the same clock time the previous day, not 96
+remaining daylight rows. They are computed separately per inverter with
+historical context across split boundaries. Tests cover missing intervals,
+different inverters and future perturbations.
 
 ## B1 target labels
 
@@ -134,9 +142,9 @@ dataset, so performance on telemetry outages is not measured by its scores.
 
 ## Encoding, scaling and imputation comparison
 
-Explicit numeric features: B1's seven physical features plus current power,
-irradiance, ambient temperature, wind
-speed, relative humidity, capacity, tilt, altitude, valid 5-minute sample count,
+Explicit numeric features: B1's seven physical features, A2's 18 history
+features, current power, irradiance, ambient temperature, wind speed, relative
+humidity, capacity, tilt, altitude, valid 5-minute sample count,
 and B2's four cyclical time features. Roof azimuth is one-hot encoded with
 unknown categories ignored. Inverter/station IDs are retained as metadata but
 excluded from model inputs.
@@ -153,18 +161,19 @@ deliverable. No test scores were used to choose the imputer.
 
 | Imputation | Validation RMSE | Validation MAE | Macro-F1 | Faulty recall |
 |---|---:|---:|---:|---:|
-| Median | 10.350 | 5.874 | 0.6272 | 0.6780 |
-| Mean | 10.351 | 5.878 | 0.6246 | 0.6746 |
+| Median | 10.114 | 5.619 | 0.6374 | 0.6692 |
+| Mean | 10.121 | 5.621 | 0.6410 | 0.6698 |
 
-Median was selected by validation macro-F1, with RMSE as a tie-breaker.
+Mean was selected by validation macro-F1, with RMSE as a tie-breaker.
 The differences are small and come from one fixed sample; they are not evidence
 of statistical significance. Final transformers were then refitted on all
 260,819 training rows. Test/validation data never contribute fitting statistics.
 
-Before B1 feature integration, the same median-imputation probe had RMSE 11.708,
-macro-F1 0.5558 and Faulty recall 0.4908 on the same sampled rows. The new features
-improved these validation results. These remain small fixed-model probes, not
-the final tuned Random Forest evaluation.
+Before B1 feature integration, the median-imputation probe had RMSE 11.708,
+macro-F1 0.5558 and Faulty recall 0.4908. After B1 integration but before A2
+history, it had RMSE 10.350, macro-F1 0.6272 and Faulty recall 0.6780 on the
+same sampled rows. These remain small fixed-model probes, not the final tuned
+Random Forest evaluation.
 
 When tuning a model, create a fresh transformer **inside** its Pipeline and pass
 `list(time_series_folds(train))` as the cross-validation splits. Use
@@ -187,7 +196,7 @@ period once before cross-validation: that would expose later fold statistics.
 Tracked audit tables are `tables/a2_preprocessing_{audit,splits,cv,imputation}.csv`.
 Audit flag counts can overlap; they should not be summed as independent removals.
 
-Fifteen automated tests passed: missing/invalid labels, weather/capacity validity,
+Seventeen automated tests passed: missing/invalid labels, weather/capacity validity,
 exact forecast timing, split/holdout boundaries, train-only imputation/scaling,
 timestamp-grouped CV with label purging, duplicate/input protection, A1/B2 import
 compatibility, missing-data-safe physical/peer features, actual calendar lookbacks,

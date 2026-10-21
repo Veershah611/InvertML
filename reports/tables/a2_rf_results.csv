@@ -1,0 +1,17 @@
+model,task,split,n,mae,rmse,r2,n_samples,confusion_matrix,macro_f1,faulty_recall,faulty_precision,faulty_pr_auc
+RF default regression,regression,train,260819,3.494,7.018,0.756,260819,null,,,,
+RF default regression,regression,val,182731,5.448,9.953,0.695,182731,null,,,,
+RF default regression,regression,test,441205,17.821,21.845,-0.149,441205,null,,,,
+RF default regression,regression,test_unseen,44634,15.696,19.678,-0.429,44634,null,,,,
+RF tuned regression,regression,train,260819,2.44,5.191,0.866,260819,null,,,,
+RF tuned regression,regression,val,182731,5.693,10.007,0.692,182731,null,,,,
+RF tuned regression,regression,test,441205,17.168,21.243,-0.087,441205,null,,,,
+RF tuned regression,regression,test_unseen,44634,14.782,18.922,-0.321,44634,null,,,,
+RF default classification,classification,train,260819,,,,260819,"[[16474, 537, 519], [3633, 196113, 22093], [620, 966, 19864]]",0.8059,0.9398,0.7948,0.9418
+RF default classification,classification,val,182731,,,,182731,"[[11536, 2168, 4177], [2664, 122966, 19175], [2411, 6120, 11514]]",0.6597,0.6452,0.6945,0.7434
+RF default classification,classification,test,441205,,,,441205,"[[82158, 23229, 96922], [7452, 52301, 18154], [18664, 74198, 68127]]",0.4615,0.4061,0.7588,0.7834
+RF default classification,classification,test_unseen,44634,,,,44634,"[[2565, 3380, 7059], [738, 4794, 2499], [1576, 13532, 8491]]",0.339,0.1972,0.5257,0.5065
+RF tuned classification,classification,train,260819,,,,260819,"[[17516, 1, 13], [2382, 210346, 9111], [99, 3, 21348]]",0.9097,0.9992,0.8759,0.9948
+RF tuned classification,classification,val,182731,,,,182731,"[[10818, 2875, 4188], [2140, 131692, 10973], [2279, 8049, 9717]]",0.6674,0.605,0.71,0.7316
+RF tuned classification,classification,test,441205,,,,441205,"[[75046, 53388, 73875], [5570, 62667, 9670], [15383, 112895, 32711]]",0.3825,0.3709,0.7817,0.7769
+RF tuned classification,classification,test_unseen,44634,,,,44634,"[[2099, 7393, 3512], [461, 6640, 930], [1058, 19630, 2911]]",0.2531,0.1614,0.5802,0.5003

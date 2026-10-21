@@ -1,0 +1,3 @@
+dropped_feature,kept_feature,correlation,threshold,reason
+irradiance_wm2,thermal_stress,0.946,0.85,High collinearity with thermal_stress (|r| = 0.95 > 0.85)
+temp_delta_stc,temp_c,1.0,0.85,High collinearity with temp_c (|r| = 1.00 > 0.85)
