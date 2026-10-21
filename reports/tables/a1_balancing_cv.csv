@@ -1,0 +1,15 @@
+strategy,C,cv_macro_f1
+class_weight,0.001,0.5655
+class_weight,0.01,0.5666
+class_weight,0.1,0.567
+class_weight,1.0,0.5671
+class_weight,10.0,0.5671
+class_weight,100.0,0.5671
+class_weight,1000.0,0.5671
+undersampling,0.001,0.5358
+undersampling,0.01,0.545
+undersampling,0.1,0.5471
+undersampling,1.0,0.5474
+undersampling,10.0,0.5474
+undersampling,100.0,0.5474
+undersampling,1000.0,0.5474
