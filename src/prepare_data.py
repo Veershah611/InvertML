@@ -63,6 +63,7 @@ LOGGER_LAST_BIN = "17:45"
 DATA_END = pd.Timestamp(CONFIG["split"]["test_end"]) + pd.Timedelta(LOGGER_LAST_BIN + ":00")
 DAYLIGHT_WM2 = CONFIG["daylight_irradiance_wm2"]
 MIN_COVERAGE = CONFIG["min_daylight_coverage"]
+SENSOR_CHANGE = pd.Timestamp(CONFIG["irradiance_sensor_change"])
 
 # The raw .ttl has one syntax error: the Zone_D block ends a statement with
 # "." instead of ";" after ratedPowerOutput, so rdflib refuses to parse it.
@@ -323,6 +324,37 @@ def merge_all(inv15, weather15, meta):
     return merged
 
 
+def correct_irradiance_sensor(merged, change=SENSOR_CHANGE):
+    """Rescale irradiance from the 2023-02-14 sensor change onwards (A1 EDA).
+
+    From that day the campus median PR drops to about 0.6 of its usual value
+    for every inverter at once, so the irradiance sensor, not the inverters,
+    changed. One factor is estimated as the median over Feb-Dec of
+    (median PR after the change in that 2023 month / median PR in the same
+    2022 month). Raw values are kept in irradiance_raw_wm2. The factor uses
+    test-year data to calibrate the sensor; no model input or training row
+    depends on it, but the report must state it.
+    """
+    df = merged
+    ok = (df["ac_power_w"].notna() & df["n_valid_5min"].gt(0)
+          & df["irradiance_wm2"].ge(100) & df["capacity_kwp"].gt(0))
+    pr = (df["ac_power_w"] / (df["irradiance_wm2"] * df["capacity_kwp"])).where(ok)
+    t = df["time"]
+    rows = []
+    for month in range(change.month, 13):
+        after = pr[(t.dt.year == change.year) & (t.dt.month == month) & (t >= change)].median()
+        before = pr[(t.dt.year == change.year - 1) & (t.dt.month == month)].median()
+        rows.append({"month": month, f"pr_{change.year - 1}": round(float(before), 4),
+                     f"pr_{change.year}_after_change": round(float(after), 4),
+                     "ratio": round(float(after / before), 4)})
+    table = pd.DataFrame(rows)
+    factor = float(table["ratio"].median())
+    df["irradiance_raw_wm2"] = df["irradiance_wm2"]
+    post = t >= change
+    df.loc[post, "irradiance_wm2"] = (df.loc[post, "irradiance_wm2"] * factor).astype("float32")
+    return df, table, factor
+
+
 def build_full_grid(inv15, freq=FREQ):
     """Reindex each inverter to every 06:00-17:45 bin from its first bin to
     the end of 2023. Added rows are NaN with n_valid_5min = 0."""
@@ -414,6 +446,12 @@ def main():
           f"({len(full) - len(inv15):,} empty bins added)")
     merged = merge_all(full, weather15, meta)
     summary.append(summary_row("merged with weather + metadata", merged))
+
+    merged, correction, factor = correct_irradiance_sensor(merged)
+    correction.to_csv(TABLES / "irradiance_correction.csv", index=False)
+    print(f"  irradiance from {SENSOR_CHANGE.date()} scaled by {factor:.4f} "
+          f"(monthly ratios {correction['ratio'].min():.3f}-{correction['ratio'].max():.3f})")
+    summary.append(summary_row("irradiance sensor correction", merged))
 
     by_month, coverage = gap_tables(merged)
     by_month.to_csv(TABLES / "gaps_by_inverter_month.csv", index=False)

@@ -3,4 +3,5 @@ raw 5-min inverter data,4766698,19,44
 resampled to 15min,1588901,20,44
 full 06:00-17:45 grid,1588901,20,44
 merged with weather + metadata,1588901,46,44
-coverage filter (>= 70%),1588901,46,44
+irradiance sensor correction,1588901,47,44
+coverage filter (>= 70%),1588901,47,44

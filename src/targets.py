@@ -131,6 +131,10 @@ def compute_health_score(
         min_irradiance: Minimum sunlight required for valid health assessment.
         filter_daylight: If True, returns only rows with irradiance >= min_irradiance.
 
+    Missing AC power (telemetry gap or offline bin) gives an undefined score
+    (NaN), not 0: a communication outage is not evidence of a fault. Outages
+    are captured by A1's is_offline / minutes_offline_24h features instead.
+
     Returns:
         DataFrame enriched with 'expected_power_w' and 'health_score'.
     """
@@ -139,7 +143,9 @@ def compute_health_score(
     # Safety fallbacks
     irr = df["irradiance_wm2"].fillna(0.0) if "irradiance_wm2" in df.columns else pd.Series(500.0, index=df.index)
     cap = df["capacity_kwp"].fillna(25.0) if "capacity_kwp" in df.columns else pd.Series(25.0, index=df.index)
-    ac = df["ac_power_w"].fillna(0.0) if "ac_power_w" in df.columns else pd.Series(0.0, index=df.index)
+    ac = df["ac_power_w"] if "ac_power_w" in df.columns else pd.Series(np.nan, index=df.index)
+    if "n_valid_5min" in df.columns:
+        ac = ac.where(df["n_valid_5min"].gt(0))
 
     expected = compute_expected_power(irr, cap, derating=derating)
     df["expected_power_w"] = expected
