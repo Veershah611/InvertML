@@ -1,2 +1,2 @@
 train_normal_rows,test_rows,injected_rows,inverter_drop,inverter_outage,contamination,detection_rate,false_alarm_rate,tp,fp
-30000,12453,108,ug_hall8_inverter,zone_d_inverter_2,0.05,0.3333,0.1941,36,2396
+30000,38979,137,ug_hall8_inverter,indoor_sports_centre_inverter,0.05,0.4672,0.0526,64,2042

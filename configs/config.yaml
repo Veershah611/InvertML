@@ -11,6 +11,9 @@ timezone: Asia/Hong_Kong
 resample_freq: 15min
 min_daylight_coverage: 0.70
 daylight_irradiance_wm2: 50   # a bin counts as daylight for coverage if irradiance >= this
+# Irradiance sensor changes scale on this day (A1 EDA); prepare_data.py rescales
+# irradiance from here on and keeps the raw values in irradiance_raw_wm2.
+irradiance_sensor_change: "2023-02-14"
 
 # Stage 4: A2 cleaning. B1 labels remain undefined below 100 W/m².
 preprocessing:

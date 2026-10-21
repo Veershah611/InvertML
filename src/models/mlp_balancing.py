@@ -26,13 +26,15 @@ from sklearn.metrics import (
     auc,
 )
 
-from src.evaluate import split_chronological
 from src.models.mlp import (
     build_mlp_classifier,
     build_mlp_regressor,
-    prepare_mlp_data,
     get_clean_features,
+    make_mlp_splits,
+    prepare_mlp_data,
+    sample_rows,
     threshold_health_score,
+    train_fill_values,
 )
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -183,7 +185,7 @@ def mlp_thresholding(X_train, y_reg_train, X_val, y_val, max_iter=150, random_st
 # 3. Main Experiment Runner
 # ===========================================================================
 
-def run_mlp_balancing_study(train_sample_size=60000, val_sample_size=30000):
+def run_mlp_balancing_study(train_sample_size=60000, val_sample_size=None):
     """Run Stage 5 balancing study comparing the 3 strategies and save CSV."""
     print("=" * 65)
     print("Stage 5: MLP Class Balancing Experiment (Partner B2)")
@@ -198,25 +200,17 @@ def run_mlp_balancing_study(train_sample_size=60000, val_sample_size=30000):
         from src.models.mlp import generate_synthetic_solar_data
         df = generate_synthetic_solar_data(n_samples=30000)
 
-    train_df, val_df, _ = split_chronological(df)
+    splits = make_mlp_splits(df)
 
-    # Take time-ordered subset for CPU benchmark
-    if len(train_df) > train_sample_size:
-        train_sub = train_df.iloc[:train_sample_size]
-    else:
-        train_sub = train_df
+    # Seeded random training sample across all inverters (CPU runtime); validation in full
+    train_prep = sample_rows(prepare_mlp_data(splits["train"]), train_sample_size)
+    val_prep = sample_rows(prepare_mlp_data(splits["val"]), val_sample_size)
+    print(f"Prepared datasets (Train: {len(train_prep):,} rows from {train_prep['inverter_id'].nunique()} "
+          f"inverters, Val: {len(val_prep):,} rows)...")
 
-    if len(val_df) > val_sample_size:
-        val_sub = val_df.iloc[:val_sample_size]
-    else:
-        val_sub = val_df
-
-    print(f"Preparing datasets (Train: {len(train_sub):,} rows, Val: {len(val_sub):,} rows)...")
-    train_prep = prepare_mlp_data(train_sub)
-    val_prep = prepare_mlp_data(val_sub)
-
-    X_train, y_reg_train, y_clf_train, _ = get_clean_features(train_prep)
-    X_val, y_reg_val, y_clf_val, _ = get_clean_features(val_prep)
+    fill_values = train_fill_values(train_prep)
+    X_train, y_reg_train, y_clf_train, _ = get_clean_features(train_prep, fill_values=fill_values)
+    X_val, y_reg_val, y_clf_val, _ = get_clean_features(val_prep, fill_values=fill_values)
 
     print(f"Cleaned feature matrices -> Train: {X_train.shape}, Val: {X_val.shape}")
     print(f"Validation class distribution: {pd.Series(y_clf_val).value_counts().to_dict()}")

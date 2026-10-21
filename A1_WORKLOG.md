@@ -188,29 +188,54 @@
 - Precision is 1-2% in every setting (108 injected rows among about 12k).
 - Outputs: `a1_iforest_tuning.csv`, `a1_iforest_test.csv`
 
-**Write-up: Reproducibility section** (Draft) ([reports/reproducibility.md](reports/reproducibility.md))
+**Final re-run on the corrected target** (Done, 2026-10-21; branches `a1/irradiance-correction`, `results/final-rerun`)
+
+*The Stage 5, 8 and 11 and Isolation Forest entries above were measured before the target was corrected. The numbers below replace them; the full cross-model comparison is in [reports/Final_Model_Comparison.md](reports/Final_Model_Comparison.md).*
+
+- **Irradiance correction** (`prepare_data.py`, Stage 3): from 2023-02-14, irradiance is multiplied by **0.570**, the median over Feb-Dec of (2023 campus PR / same-month 2022 PR). Raw values are kept in `irradiance_raw_wm2`; monthly ratios are in `reports/tables/irradiance_correction.csv` (0.51-0.72).
+  - Faulty labels after 14 Feb fall from 54.0% to 9.5%, in line with train (7.4%) and validation (11.6%).
+  - The factor uses test-year data: a stated limitation. One factor over-corrects late 2023 slightly.
+- **Missing power:** B1's health score is now undefined, not 0, when AC power is missing; outages are covered by the outage features.
+- **EDA:** the sensor-shift figure now plots raw and corrected irradiance (`src/eda.py`, notebook updated).
+- **Final A1 results** (18 features incl. outage; logged once to `results/results.csv`):
+
+  | Model | Val | Test | Test before / after 14 Feb (RMSE or macro-F1) | Unseen |
+  |---|---|---|---|---|
+  | Persistence (RMSE) | 13.04 | 12.30 | 10.89 / 12.44 | 10.73 |
+  | Ridge (RMSE, alpha 0.01) | 11.95 | 11.29 | 11.21 / 11.30 | 9.71 |
+  | Majority (macro-F1) | 0.29 | 0.30 | 0.30 / 0.30 | 0.32 |
+  | Rule: status of Health(t) (macro-F1 / Faulty recall) | 0.60 / 0.65 | 0.59 / 0.60 | 0.67 / 0.58 | 0.47 / 0.37 |
+  | Rule: peer deviation (cut-offs -0.225 / -0.40) | 0.62 / 0.54 | 0.61 / 0.59 | 0.68 / 0.60 | 0.49 / 0.34 |
+  | Logistic (C 10, class weights) | 0.54 / **0.72** | 0.53 / **0.70** | 0.63 / 0.52 | 0.35 / 0.39 |
+
+  - Ridge now beats persistence on every split, including after 14 Feb; before the fix it lost on the 2023 test year.
+  - **Logistic Regression has the highest Faulty recall of all project models** (val 0.72, test 0.70), so it is the selected fault alarm in the final comparison; it has the lowest macro-F1 among learned models, so it raises more false alarms.
+  - The peer-deviation rule no longer collapses after 14 Feb (F1 0.68 before, 0.60 after), which confirms that the earlier collapse came from the shifted labels.
+- **Stage 5 re-run:** class weights (C 10) Faulty recall 0.721 / macro-F1 0.544 against undersampling (C 0.001) 0.638 / 0.561; class weights stay selected. Target Faulty share: train 6.7%, val 9.7%, test 8.8%. Ridge error by range: Faulty MAE 26.5 (mean error +25.9), Healthy MAE 3.8.
+- **Per season (test):** Ridge RMSE 9.4 (spring) to 12.9 (summer); Ridge beats persistence on RMSE in spring and summer, persistence is better on MAE in every season.
+- **Per inverter (test):** highest Ridge RMSE at S H Ho Sports Hall Inverter 2 (20.7), UG Hall2 2F (19.6) and S H Ho Sports Hall Inverter 1 (19.2).
+- **Isolation Forest re-run** (`iforest_a1.py`): with peer deviation, tuned (0.01, 400 trees): detection 31.4%, false alarms 0.6% (0.6% before and after 14 Feb), F1 0.21, the best F1 of all settings. A2's settings with peer deviation: detection 65.7%, false alarms 3.9%. The post-14-Feb false-alarm problem disappeared with the corrected labels.
+
+**Write-up: Reproducibility section** (Done) ([reports/reproducibility.md](reports/reproducibility.md))
 - Covers environment, data sources and licences, pipeline commands in order with measured run times, seeds and config, leakage controls, results tracking, and caveats.
-- Rows for B1's and B2's entry points are marked "to be completed".
+- Completed 2026-10-21 with every team member's entry points, the final run order and run times.
 
 ## Open issues
-- Azimuth is `"Mixed"` for several stations. (Tilt is fixed on `a1/tilt-fix`.)
-- The A1 branches are independent. After they are merged, re-run `linear_evaluation.py` with the outage features and the selected balancing, and log the final rows to `results.csv` once.
-- Isolation Forest: the Health ≥ 90 "normal" filter is biased after 14 Feb. A label-free normal filter (for example a peer-deviation band) would make the benchmark fairer.
+- Azimuth is `"Mixed"` for several stations.
 - Zone D capacities are inconsistent with the data (see EDA). Indoor Sports Centre's capacity is fine.
-- **For B1:** the health score uses raw irradiance, so the 2023-02-14 sensor change pushes 52% of post-change rows into Faulty. `create_forecasting_target` shifts by row, which can jump overnight on daylight-filtered data. Missing power is filled with 0, so outages score health 0.
-- **For B2:**
-  - `sq14_inverter` is in the unseen list but is not one of the 44 inverters.
-  - Zone A2 Inverters 2 and 3 are held out while Inverter 1 of the same station is in training.
-  - The MLP uses `ac_power_w`, `irradiance_wm2` and `capacity_kwp` to predict Health(t), which is computed from those same values (§7.2 leakage), and it scores night rows.
-  - `orient_south` and `orient_east_west` are constant 0 for every inverter.
+- The irradiance correction factor is estimated from test-year data and is one factor for the whole post-change period.
+- `orient_south` and `orient_east_west` are constant 0 for every inverter (B2 metadata features).
+- `sq14_inverter` is in the unseen list but is not one of the 44 inverters, so the unseen test has 6 inverters.
+- B1's XGBoost builds features on the full grid, so held-out inverters contribute to campus peer medians (A2 audit, item 4).
+- Resolved 2026-10-21: tilt NaNs, the sensor change, zero-filled outages, B1's XGBoost leakage, B2's MLP sampling and target, and the A1 re-run on the final features.
 
 ## To do (A1)
 - [ ] Share `hkust_15min_v1.parquet` with the team (Drive/OneDrive)
 - [ ] Tell the team about the irradiance sensor change and the Zone D capacities (see EDA)
 - [x] Features: `is_offline`, minutes offline in the last 24 h (`a1/outage-features`)
 - [x] Add the peer-deviation rule (`a1/evaluation`)
-- [ ] Re-run baselines once B1 fixes the target
+- [x] Re-run baselines once B1 fixes the target (2026-10-21, after the target fix)
 - [x] Stage 5 balancing for Logistic (`a1/balancing`)
 - [x] Stage 11 evaluation of Ridge / Logistic (`a1/evaluation`)
-- [x] Isolation Forest on HKUST with injected faults (`a1/iforest`); A2 to review
-- [ ] Finish the reproducibility section once B1 and B2 add their entry points
+- [x] Isolation Forest on HKUST with injected faults (`a1/iforest`); A2 to review the extension
+- [x] Finish the reproducibility section (2026-10-21)

@@ -262,43 +262,80 @@ def evaluate_fault_detection(y_true_injected, anomaly_predictions):
 # 4. GPVS Real-Fault Benchmark
 # ---------------------------------------------------------------------------
 
-def load_gpvs_faults():
-    """Load real laboratory faults from data/raw/GPVS-Faults.
+GPVS_DIR = ROOT / "data" / "raw" / "GPVS-Faults"
+GPVS_WINDOW_S = 0.1             # 0.1 s = 5 grid cycles at 50 Hz, about 1,000 samples
+GPVS_NORMAL_END = 0.45          # faults start "halfway": first 45% of a fault file is normal
+GPVS_FAULT_START = 0.55         # last 45% is fault; the uncertain middle 10% is dropped
+GPVS_DC_SIGNALS = ["Ipv", "Vpv", "Vdc"]
+GPVS_AC_SIGNALS = ["ia", "ib", "ic", "va", "vb", "vc"]
+GPVS_DOWNLOAD = ("GPVS-Faults data not found in data/raw/GPVS-Faults/. Download CSV_Files.zip from "
+                 "https://data.mendeley.com/datasets/n76t439f65/1 (DOI 10.17632/n76t439f65.1, CC BY 4.0) "
+                 "and extract the 16 F*.csv files into data/raw/GPVS-Faults/.")
 
-    If files are not downloaded yet, generates a simple mock dataset
-    matching solar voltage, current, and power so the code runs.
+
+def gpvs_window_features(df, window_s=GPVS_WINDOW_S):
+    """Window statistics for one scenario file: mean/std/min/max of the DC
+    signals and RMS of the six phase currents and voltages, per window."""
+    w = (df["Time"] // window_s).astype(int)
+    g = df.groupby(w)
+    feats = g[GPVS_DC_SIGNALS].agg(["mean", "std", "min", "max"])
+    feats.columns = [f"{col}_{stat}" for col, stat in feats.columns]
+    rms = np.sqrt((df[GPVS_AC_SIGNALS] ** 2).groupby(w).mean()).add_suffix("_rms")
+    out = feats.join(rms)
+    out["t_start"] = g["Time"].min()
+    out["n_samples"] = g.size()
+    return out.reset_index(drop=True)
+
+
+def load_gpvs_windows(data_dir=GPVS_DIR, window_s=GPVS_WINDOW_S):
+    """All 16 GPVS-Faults scenarios as labelled windows.
+
+    Files are named F<x><y>: x = 0 fault-free, 1-7 fault type; y = L (IPPT) or
+    M (MPPT). F0 windows are all normal. In F1-F7 the fault is introduced
+    halfway, so the first 45% of each file is normal (is_fault 0), the last
+    45% is fault (is_fault 1) and the middle 10% is dropped. Raises an error
+    if the data is missing; there is no synthetic fallback.
     """
-    gpvs_dir = ROOT / "data" / "raw" / "GPVS-Faults"
-    csv_files = list(gpvs_dir.glob("*.csv")) if gpvs_dir.exists() else []
+    files = sorted(Path(data_dir).glob("F[0-7][LM].csv"))
+    if not files:
+        raise FileNotFoundError(GPVS_DOWNLOAD)
+    parts = []
+    for f in files:
+        win = gpvs_window_features(pd.read_csv(f), window_s)
+        win = win[win["n_samples"] >= 0.5 * win["n_samples"].median()]   # drop a short last window
+        pos = win["t_start"] / win["t_start"].max()
+        fault_type = int(f.stem[1])
+        if fault_type == 0:
+            win["is_fault"] = 0
+        else:
+            win["is_fault"] = np.where(pos >= GPVS_FAULT_START, 1, np.where(pos < GPVS_NORMAL_END, 0, -1))
+            win = win[win["is_fault"] >= 0]
+        win.insert(0, "scenario", f.stem)
+        win.insert(1, "fault_type", fault_type)
+        win.insert(2, "mode", "MPPT" if f.stem.endswith("M") else "IPPT")
+        win["position"] = pos.loc[win.index]
+        parts.append(win)
+    return pd.concat(parts, ignore_index=True)
 
-    if len(csv_files) > 0:
-        dfs = []
-        for f in csv_files:
-            sub = pd.read_csv(f)
-            # F0 means healthy, F1-F7 are faults
-            sub["is_fault"] = 0 if "f0" in f.name.lower() else 1
-            dfs.append(sub)
-        full = pd.concat(dfs, ignore_index=True)
-        feature_cols = [c for c in full.columns if c not in ["is_fault", "time"]]
-        return full[feature_cols], full["is_fault"]
 
-    # Simple fallback data so tests always pass
-    np.random.seed(42)
-    normal_v = np.random.normal(380, 5, 1000)
-    normal_i = np.random.normal(12, 1, 1000)
-    normal_p = normal_v * normal_i
+def gpvs_feature_columns(windows):
+    return [c for c in windows.columns
+            if c.endswith(("_mean", "_std", "_min", "_max", "_rms"))]
 
-    fault_v = np.random.normal(250, 20, 100)
-    fault_i = np.random.normal(3, 1, 100)
-    fault_p = fault_v * fault_i
 
-    X = pd.DataFrame({
-        "voltage": np.concatenate([normal_v, fault_v]),
-        "current": np.concatenate([normal_i, fault_i]),
-        "power": np.concatenate([normal_p, fault_p]),
-    })
-    y = np.concatenate([np.zeros(1000), np.ones(100)])
-    return X, y
+def load_gpvs_faults():
+    """Real GPVS-Faults windows as (X, y): window features and fault label."""
+    windows = load_gpvs_windows()
+    return windows[gpvs_feature_columns(windows)], windows["is_fault"].to_numpy()
+
+
+def make_synthetic_gpvs(seed=42):
+    """Synthetic stand-in data for unit tests ONLY; never use it for reported results."""
+    rng = np.random.RandomState(seed)
+    X = pd.DataFrame({"voltage": np.r_[rng.normal(380, 5, 1000), rng.normal(250, 20, 100)],
+                      "current": np.r_[rng.normal(12, 1, 1000), rng.normal(3, 1, 100)]})
+    X["power"] = X["voltage"] * X["current"]
+    return X, np.r_[np.zeros(1000), np.ones(100)]
 
 
 # ---------------------------------------------------------------------------
@@ -363,8 +400,11 @@ if __name__ == "__main__":
     fault_stats = evaluate_fault_detection(faulty_df["is_injected_fault"], faulty_df["is_injected_fault"])
     print(f"Fault Detection:      Detection Rate = {fault_stats['detection_rate']}")
 
-    # 5. Test GPVS loader
-    X_gpvs, y_gpvs = load_gpvs_faults()
-    print(f"GPVS Dataset:         {len(X_gpvs)} rows loaded.")
+    # 5. Test GPVS loader (real data only; skipped if not downloaded)
+    try:
+        X_gpvs, y_gpvs = load_gpvs_faults()
+        print(f"GPVS Dataset:         {len(X_gpvs)} windows loaded ({int(y_gpvs.sum())} fault windows).")
+    except FileNotFoundError as err:
+        print(f"GPVS Dataset:         skipped. {err}")
 
     print("\nAll evaluate.py functions are working properly!")

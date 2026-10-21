@@ -32,7 +32,7 @@ SEQ_BLUES = LinearSegmentedColormap.from_list(
     "seq_blues", ["#f2f7fd", "#cde2fb", "#86b6ef", "#3987e5", "#1c5cab", "#0d366b"])
 
 COLUMNS = ["inverter_id", "time", "ac_power_w", "n_valid_5min",
-           "irradiance_wm2", "capacity_kwp"]
+           "irradiance_wm2", "irradiance_raw_wm2", "capacity_kwp"]
 
 
 def set_style():
@@ -145,16 +145,23 @@ def weekly_yield_ratio(df):
 
     For a healthy system this ratio is roughly constant (it is close to the
     performance ratio), so a sudden step for all inverters at once points to
-    the irradiance sensor, not the inverters."""
+    the irradiance sensor, not the inverters. Computed on the raw sensor
+    values (irradiance_raw_wm2) and on the corrected values that
+    prepare_data.py writes from the sensor change onwards."""
     d = daylight_valid(df)
-    ratio = d["specific_yield"] / (d["irradiance_wm2"] / 1000)
-    weekly = ratio.groupby(d["time"].dt.to_period("W").dt.start_time).median()
-    return weekly.rename("median_ratio").reset_index()
+    week = d["time"].dt.to_period("W").dt.start_time
+    raw = (d["specific_yield"] / (d["irradiance_raw_wm2"] / 1000)).groupby(week).median()
+    corrected = (d["specific_yield"] / (d["irradiance_wm2"] / 1000)).groupby(week).median()
+    return pd.DataFrame({"median_ratio": raw, "median_ratio_corrected": corrected}).reset_index(names="time")
 
 
 def plot_weekly_yield_ratio(weekly, change_date="2023-02-14"):
     fig, ax = plt.subplots(figsize=(10, 3.8))
-    ax.plot(weekly["time"], weekly["median_ratio"], color=BLUE, lw=2)
+    ax.plot(weekly["time"], weekly["median_ratio"], color=BLUE, lw=2, label="raw sensor")
+    if "median_ratio_corrected" in weekly:
+        ax.plot(weekly["time"], weekly["median_ratio_corrected"], color=INK_2, lw=1.2, ls=":",
+                label="after correction in prepare_data.py")
+        ax.legend(loc="lower left", fontsize=8)
     ax.axvline(pd.Timestamp(change_date), color=INK_2, lw=1, ls="--")
     ax.annotate(f"Irradiance readings jump\n{change_date}", xy=(pd.Timestamp(change_date), 1.1),
                 xytext=(10, 0), textcoords="offset points", color=INK_2, fontsize=8, va="top")

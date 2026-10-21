@@ -10,7 +10,7 @@
 
 **Stage 7 Lead:** Partner B1 (Feature Specialist & XGBoost Track Lead)  
 **Contributors:** Partner B2 (Cyclical Time & Station Metadata Features), Pair A (A1 Outage & A2 Rolling Lags)  
-**Assignment Reference:** Innovative Assignment Guidelines §2 (Stage 7) & [`Solar_Inverter_Health_Monitoring.md`](file:///Users/hettala/Downloads/ML%20ass/Solar_Inverter_Health_Monitoring.md)
+**Assignment Reference:** Innovative Assignment Guidelines §2 (Stage 7) & [`Solar_Inverter_Health_Monitoring.md`](../Solar_Inverter_Health_Monitoring.md)
 
 ---
 
@@ -25,7 +25,7 @@ As the **Pipeline Lead for Stage 7**, Partner B1 has designed, implemented, and 
 4. The **domain-specific physical feature groups**—specifically **Peer-Deviation** (weather noise cancellation) and **Self-Relative Deviation** (long-term string degradation).
 5. The **collinearity analysis and automated feature pruning framework**, reducing redundant multi-collinear variables on the training set to ensure tree stability and clean SHAP interpretability.
 
-All reusable code is unified in [`src/targets.py`](file:///Users/hettala/Downloads/ML%20ass/src/targets.py) and [`src/features.py`](file:///Users/hettala/Downloads/ML%20ass/src/features.py).
+All reusable code is unified in [`src/targets.py`](../src/targets.py) and [`src/features.py`](../src/features.py).
 
 ---
 
@@ -66,7 +66,7 @@ $$\text{Status} = \begin{cases}
 
 > **Critical Methodological Vulnerability:** If a model predicts $\text{Health}(t)$ while having access to $\text{ac\_power\_w}(t)$ and $\text{irradiance\_wm2}(t)$ in its feature matrix $X(t)$, the learner trivially solves the linear algebraic formula rather than learning underlying degradation dynamics. This invalidates predictive maintenance.
 
-To guarantee rigorous evaluation, B1 implemented two strictly compliant operational modes in [`prepare_leakage_free_matrices`](file:///Users/hettala/Downloads/ML%20ass/src/targets.py#L218-L260):
+To guarantee rigorous evaluation, B1 implemented two strictly compliant operational modes in [`prepare_leakage_free_matrices`](../src/targets.py#L218-L260):
 
 1. **Option A — Forecasting (Lead Target):**
    * The target is shifted forward: $\text{Target} = \text{Health}(t + h)$ where $h = 4$ steps ($1$ hour ahead).
@@ -82,28 +82,31 @@ To guarantee rigorous evaluation, B1 implemented two strictly compliant operatio
 To justify the selection of $90.0$ and $70.0$ thresholds, B1 executed a parameter sweep over `Faulty` boundaries $[55, 85]$ (step 5) and `Warning` boundaries $[85, 90, 95]$ across all daylight intervals.
 
 ### Table 7.1: Threshold Sensitivity Grid Sweep Summary (Excerpts from `reports/tables/b1_target_sensitivity.csv`)
-| Faulty Threshold | Warning Threshold | % Healthy | % Warning | % Faulty | Faulty Sample Count | Marginal $\Delta \% / \text{unit}$ |
-|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| 55.0 | 90.0 | 81.38% | 14.15% | 4.47% | 7,308 | +0.22 |
-| 60.0 | 90.0 | 81.38% | 13.04% | 5.58% | 9,123 | +0.26 |
-| 65.0 | 90.0 | 81.38% | 11.60% | 7.02% | 11,478 | +0.31 |
-| **70.0 (Baseline)** | **90.0 (Baseline)** | **81.38%** | **9.95%** | **8.67%** | **14,175** | **+0.35** |
-| 75.0 | 90.0 | 81.38% | 8.04% | 10.58% | 17,298 | +0.40 |
-| 80.0 | 90.0 | 81.38% | 5.86% | 12.76% | 20,862 | +0.46 |
-| 85.0 | 90.0 | 81.38% | 3.31% | 15.31% | 25,031 | +0.53 |
 
-*Full results: [`reports/tables/b1_target_sensitivity.csv`](file:///Users/hettala/Downloads/ML%20ass/reports/tables/b1_target_sensitivity.csv).*
+*Updated 2026-10-21: re-run on the corrected target (irradiance rescaled after 2023-02-14, undefined health for missing power); 949,973 daylight samples.*
+
+| Faulty Threshold | Warning Threshold | % Healthy | % Warning | % Faulty | Faulty Sample Count | Change in % Faulty per unit (vs previous row) |
+|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| 55.0 | 90.0 | 80.70% | 14.58% | 4.72% | 44,829 | — |
+| 60.0 | 90.0 | 80.70% | 13.37% | 5.93% | 56,339 | +0.24 |
+| 65.0 | 90.0 | 80.70% | 11.83% | 7.48% | 71,027 | +0.31 |
+| **70.0 (Baseline)** | **90.0 (Baseline)** | **80.70%** | **10.00%** | **9.30%** | **88,333** | **+0.36** |
+| 75.0 | 90.0 | 80.70% | 7.91% | 11.39% | 108,218 | +0.42 |
+| 80.0 | 90.0 | 80.70% | 5.57% | 13.73% | 130,466 | +0.47 |
+| 85.0 | 90.0 | 80.70% | 2.96% | 16.34% | 155,268 | +0.52 |
+
+*Full results: [`reports/tables/b1_target_sensitivity.csv`](tables/b1_target_sensitivity.csv).*
 
 ### Sensitivity Insights:
-* **Baseline Selection ($70 / 90$):** At $< 70.0$, the `Faulty` class represents $8.67\%$ of daylight operations. This captures true persistent underperformance without swamping field teams with false alarms.
+* **Baseline Selection ($70 / 90$):** At $< 70.0$, the `Faulty` class represents $9.30\%$ of daylight operations. This captures true persistent underperformance without swamping field teams with false alarms.
 * **Marginal Stability:** Setting the threshold below $65.0$ risks missing partial string disconnects, while setting it above $75.0$ causes false positives during rapid passing cloud shadows.
-* **Visual Validation:** Figures are stored in [`reports/figures/b1_target_distribution.png`](file:///Users/hettala/Downloads/ML%20ass/reports/figures/b1_target_distribution.png) and [`reports/figures/b1_threshold_sensitivity_study.png`](file:///Users/hettala/Downloads/ML%20ass/reports/figures/b1_threshold_sensitivity_study.png).
+* **Visual Validation:** Figures are stored in [`reports/figures/b1_target_distribution.png`](figures/b1_target_distribution.png) and [`reports/figures/b1_threshold_sensitivity_study.png`](figures/b1_threshold_sensitivity_study.png).
 
 ---
 
 ## 7.5 Physical Feature Engineering Groups
 
-Feature transformations in [`src/features.py`](file:///Users/hettala/Downloads/ML%20ass/src/features.py) are partitioned into specialized domains:
+Feature transformations in [`src/features.py`](../src/features.py) are partitioned into specialized domains:
 
 ### 1. Specific Yield & Performance Ratio (B1)
 * `specific_yield` $= (P_{\text{ac}} / 1000) / \text{capacity\_kwp}$ (kW/kWp): Scales output across arrays from $10\text{ kWp}$ to $50\text{ kWp}$.
@@ -150,7 +153,7 @@ High-dimensional physical feature engineering introduces multi-collinearity. For
 | `temp_delta_stc` | `hour_cos` | $0.94$ | Collinear with diurnal heating; `temp_c` is retained in thermal stress. |
 | `performance_ratio` | `peer_dev_campus` | $1.00$ | Raw PR carries weather fluctuations; peer deviation cancels weather noise. |
 
-*Heatmap visualization: [`reports/figures/b1_feature_correlation_matrix.png`](file:///Users/hettala/Downloads/ML%20ass/reports/figures/b1_feature_correlation_matrix.png).*
+*Heatmap visualization: [`reports/figures/b1_feature_correlation_matrix.png`](figures/b1_feature_correlation_matrix.png).*
 
 ### 7.6.2 Final Selected Feature Set (13 Features)
 Following collinearity pruning, the 13 final predictors are:

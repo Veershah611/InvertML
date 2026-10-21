@@ -77,7 +77,7 @@ $$\text{Health Score} = \min\left(100.0, \, \frac{\text{Actual AC Power}}{\text{
 
 ### Task 3: Feature Engineering — Peer & Self Deviations (B1's Signature Group)
 
-Add your assigned feature functions to [`src/features.py`](file:///Users/akshayjoshi/Desktop/InvertML/src/features.py):
+Add your assigned feature functions to [`src/features.py`](src/features.py):
 
 #### 1. Peer Deviation Feature:
 * **Why it matters:** If heavy cloud cover hits campus, all inverters drop power simultaneously (normal weather). But if Inverter 1 outputs $2\text{ kW}$ while Inverter 2 on the **exact same rooftop** outputs $20\text{ kW}$, Inverter 1 has suffered a hardware failure!
@@ -92,7 +92,7 @@ Add your assigned feature functions to [`src/features.py`](file:///Users/akshayj
 
 ### Task 4: Supervised Modeling — XGBoost (Track T3 Lead)
 
-Create [`src/models/xgb.py`](file:///Users/akshayjoshi/Desktop/InvertML/src/models/xgb.py) and build both models:
+Create [`src/models/xgb.py`](src/models/xgb.py) and build both models:
 
 #### 1. `xgb_regressor` (Continuous Health Score Prediction):
 ```python
@@ -135,7 +135,7 @@ xgb_classifier = xgb.XGBClassifier(
       log_experiment            # Logs directly to results/results.csv
   )
   ```
-* Log your test scores to [`results/results.csv`](file:///Users/akshayjoshi/Desktop/InvertML/results/results.csv) to benchmark XGBoost against B2's MLP!
+* Log your test scores to [`results/results.csv`](results/results.csv) to benchmark XGBoost against B2's MLP!
 
 ---
 
@@ -179,8 +179,8 @@ plt.savefig("reports/figures/b1_shap_waterfall.png")
 
 ### Task 7: Unsupervised Anomaly Detection (Shared with B2)
 
-* Partner B2 has already implemented and verified [`src/models/iforest.py`](file:///Users/akshayjoshi/Desktop/InvertML/src/models/iforest.py) on the GPVS-Faults physical benchmark.
-* **B1's Role:** Review the benchmark code, verify the **77.27% Precision** and **68.00% Recall** results on real hardware faults, and co-author the anomaly detection evaluation in Section 11 of the report.
+* Partner B2 has already implemented and verified [`src/models/iforest.py`](src/models/iforest.py) on the GPVS-Faults physical benchmark.
+* **B1's Role:** Review the benchmark code and co-author the anomaly detection evaluation in Section 11 of the report. *Update 2026-10-21:* the earlier 77.27% precision / 68.00% recall came from synthetic fallback data; on the real GPVS-Faults files the detector reaches precision 100%, recall 38.96%, F1 0.56 (`reports/Section_09_10_XGBoost.md`, section 11.4).
 
 ---
 
@@ -239,6 +239,6 @@ solar-health/
 2. **"Why did you build Peer-Deviation features?"**
    * *Answer:* Raw power drops can be caused by passing clouds or actual broken hardware. By normalizing an inverter against its neighboring peers on the exact same rooftop under identical instantaneous irradiance, weather noise cancels out, isolating true localized hardware faults.
 3. **"What did SHAP values reveal about your XGBoost model?"**
-   * *Answer:* Tree-SHAP revealed that active power and irradiance contribute over $90\%$ of predictive weight. Local waterfall plots on failure cases proved that sudden power drops with high peer deviations trigger the highest positive SHAP attribution towards the `Faulty` class.
+   * *Answer (updated 2026-10-21 from the final run):* AC power and irradiance are not XGBoost inputs. Tree-SHAP on 1,500 test rows ranks `peer_dev_campus` first (mean |SHAP| 3.15 health points) and current health second (2.56), then `self_dev_30d` and the seasonal/hour terms. The waterfall for the worst error shows a sudden drop from health 100 to 34 within the hour that nothing in the inputs at t signalled (`reports/Section_09_10_XGBoost.md`, section 11.2).
 4. **"How does your XGBoost compare to B2's Neural Network (MLP) on Unseen Stations?"**
-   * *Answer:* While XGBoost achieves slightly sharper splits on known rooftops, B2's MLP neural network generalizes more smoothly to completely Unseen Rooftops (5.04 RMSE) because continuous weight embeddings avoid over-partitioning on station-specific quirks.
+   * *Answer (updated 2026-10-21 from the final run):* XGBoost is better on unseen inverters: RMSE 9.90 against the MLP's 14.02 (persistence 10.73). The earlier MLP figure of 5.04 came from a run that trained and tested on only a few inverters. Across all tracks, A2's Random Forest is best on unseen inverters (9.07).

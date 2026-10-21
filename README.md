@@ -64,6 +64,12 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
+Re-run `pip install -r requirements.txt` after pulling: older environments may be missing `shap`, `statsmodels` or `xgboost`.
+
+**Jupyter:** register the venv as a kernel once and select it in every notebook. The default `python3` kernel can point at a system Python without `pyarrow`, and the notebooks then fail while loading data.
+```
+python -m ipykernel install --user --name invertml
+```
 
 ### 2. Get the HKUST dataset
 1. Download the dataset from Dryad: https://doi.org/10.5061/dryad.m37pvmd99 (about 296 MB zipped, about 1 GB unzipped).
@@ -88,14 +94,14 @@ data/raw/
 ```
 python -m src.prepare_data
 ```
-This takes about 75 seconds. It leaves the raw files untouched and writes:
+This takes about 2 minutes. It leaves the raw files untouched and writes:
 
 | File | Contents |
 |---|---|
 | `data/processed/inverter_metadata.parquet` | one row per inverter: capacity (kWp), station, orientation, panel specs |
 | `data/processed/inverter_5min.parquet` | all 44 inverters at 5-min, float32 |
 | `data/processed/weather_1min.parquet` | all weather variables at 1-min, float32 |
-| `data/processed/hkust_15min_v1.parquet` | **the main table**: inverters + weather + metadata at 15-min (1,588,901 rows x 45 columns) |
+| `data/processed/hkust_15min_v1.parquet` | **the main table**: inverters + weather + metadata at 15-min (1,588,901 rows x 47 columns). Irradiance from 2023-02-14 is corrected for a sensor change (factor 0.570); raw values are in `irradiance_raw_wm2` |
 | `reports/tables/prep_summary.csv` | rows and columns before/after each preparation step |
 | `reports/tables/coverage_by_inverter.csv` | daylight data coverage per inverter |
 | `reports/tables/gaps_by_inverter_month.csv` | missing daylight intervals per inverter per month |
@@ -103,9 +109,16 @@ This takes about 75 seconds. It leaves the raw files untouched and writes:
 Teammates who don't want to run this step can download the shared `hkust_15min_v1.parquet` from the team drive and place it in `data/processed/`.
 
 ### 4. GPVS-Faults
-Download instructions and the loader will be added by B2.
+1. Download `CSV_Files.zip` (115 MB) from https://data.mendeley.com/datasets/n76t439f65/1 (DOI 10.17632/n76t439f65.1, CC BY 4.0).
+2. Extract the 16 files `F0L.csv` ... `F7M.csv` into `data/raw/GPVS-Faults/`.
 
-Full reproduction steps, seeds and run times: [reports/reproducibility.md](reports/reproducibility.md).
+The loader in `src/evaluate.py` raises an error if these files are missing; it never substitutes synthetic data.
+
+### 5. Run the models and tests
+Run order, commands and measured run times for every member's models: [reports/reproducibility.md](reports/reproducibility.md). Final results: [reports/Final_Model_Comparison.md](reports/Final_Model_Comparison.md).
+```
+python -m unittest discover -s tests
+```
 
 ## Repository structure
 ```
@@ -113,10 +126,15 @@ Full reproduction steps, seeds and run times: [reports/reproducibility.md](repor
 ├── data/                 # raw + processed data (git-ignored)
 ├── src/
 │   ├── prepare_data.py   # Stage 3: raw files -> hkust_15min_v1.parquet (A1)
-│   └── models/           # one file per model family
+│   ├── preprocess.py     # Stage 4: cleaning, splits, imputation (A2)
+│   ├── features.py       # Stage 7: feature groups from all four members
+│   ├── targets.py        # Stage 7: health score and status labels (B1)
+│   ├── evaluate.py       # Stage 11: splits, metrics, fault injection, GPVS loader, logger (B2)
+│   └── models/           # linear (A1), rf (A2), xgb (B1), mlp (B2), iforest* (pairs)
+├── tests/                # unit tests (python -m unittest discover -s tests)
 ├── notebooks/            # thin drivers that import from src/, one owner per notebook
 ├── results/              # results.csv: one row per final model run
-├── reports/              # figures/ and tables/ for the report
+├── reports/              # report sections, figures/ and tables/; start with Final_Model_Comparison.md
 ├── requirements.txt      # pinned package versions
 ├── Solar_Inverter_Health_Monitoring.md   # full project design
 ├── TEAM_PROGRESS.md      # status per pipeline stage and person

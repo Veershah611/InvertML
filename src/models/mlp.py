@@ -12,10 +12,16 @@ This module implements:
 7. Model Explainability & Error Analysis: Permutation Importance, PDP, and Failure Cases (Task 7).
 8. Logging results to results/results.csv.
 
+Target: Health(t + 1 h), exact time match (§7.2 Option A, same as A1 and B1).
+Splits: B2's functions, held-out inverters excluded from train and validation.
+Training uses a seeded random sample of 60k rows across all inverters; every
+other split is scored in full.
+
 Commands:
     python -m src.models.mlp           # Run baseline models
     python -m src.models.mlp --tune    # Run hyperparameter tuning
     python -m src.models.mlp --explain # Run Task 7 explainability analysis
+    add --log to write the final rows to results/results.csv (once)
 """
 
 import sys
@@ -34,9 +40,9 @@ from src.features import build_b2_features
 from src.targets import (
     compute_health_score,
     assign_operational_status,
-    create_forecasting_target,
 )
 from src.evaluate import (
+    CONFIG,
     split_chronological,
     split_unseen_stations,
     evaluate_regression,
@@ -47,6 +53,9 @@ from src.evaluate import (
 
 ROOT = Path(__file__).resolve().parents[2]
 PROCESSED_DIR = ROOT / "data" / "processed"
+SEED = 42
+TRAIN_SAMPLE = 60000          # random training rows across all inverters (CPU runtime)
+BALANCING_TABLE = ROOT / "reports" / "tables" / "b2_balancing.csv"
 
 
 # ===========================================================================
@@ -150,7 +159,13 @@ def threshold_health_score(scores):
 # ===========================================================================
 
 def prepare_mlp_data(df, horizon_steps=4):
-    """Add time features, metadata features, and canonical forecasting target Health(t + 1h)."""
+    """Add time features, metadata features, and canonical forecasting target Health(t + 1h).
+
+    The target is the health score exactly horizon_steps x 15 min later for the
+    same inverter (joined on time, as A1 and B1 do), so the last bins of a day
+    never take their target from the next morning. Rows where Health(t) or
+    Health(t + 1h) is undefined are dropped.
+    """
     df = df.copy()
 
     # Add B2 time and station features
@@ -163,17 +178,15 @@ def prepare_mlp_data(df, horizon_steps=4):
 
     df["health_now"] = df["health_score"]
 
-    # Construct the future forecasting target Health(t + 1h) to prevent circular leakage (§7.2 Option A)
+    # Future forecasting target Health(t + 1h), exact time match (§7.2 Option A)
     target_lead_col = f"health_score_lead{horizon_steps}"
     if target_lead_col not in df.columns:
-        inv_col = "inverter_id" if "inverter_id" in df.columns else None
-        if inv_col is not None and inv_col in df.columns:
-            df = create_forecasting_target(df, horizon_steps=horizon_steps, target_col="health_score", inverter_col=inv_col)
-        else:
-            df[target_lead_col] = df["health_score"].shift(-horizon_steps)
+        df["inverter_id"] = df["inverter_id"].astype(str)
+        lead = df[["inverter_id", "time", "health_score"]].rename(columns={"health_score": target_lead_col})
+        lead["time"] = lead["time"] - pd.Timedelta(minutes=15 * horizon_steps)
+        df = df.merge(lead, on=["inverter_id", "time"], how="left", validate="one_to_one")
 
-    # Filter out rows where future target is NaN (e.g. at day's end where t+1h is night)
-    df = df.dropna(subset=[target_lead_col]).copy()
+    df = df.dropna(subset=["health_now", target_lead_col]).reset_index(drop=True)
 
     # Operational status at t+1h
     df["status_future"] = assign_operational_status(df[target_lead_col].values)
@@ -181,7 +194,30 @@ def prepare_mlp_data(df, horizon_steps=4):
     return df
 
 
-def get_clean_features(df, horizon_steps=4):
+def make_mlp_splits(df):
+    """B2's split functions; held-out inverters stay out of train and val (A2's rule)."""
+    _, val, test = split_chronological(df)
+    train, unseen = split_unseen_stations(df)
+    held = {s.lower() for s in CONFIG.get("unseen_stations", [])}
+    val = val[~val["inverter_id"].astype(str).str.lower().isin(held)]
+    return {"train": train, "val": val, "test": test, "test_unseen": unseen}
+
+
+def sample_rows(df, n, seed=SEED):
+    """Seeded random sample across all inverters and dates, returned in time order."""
+    if n is None or len(df) <= n:
+        return df.sort_values(["time", "inverter_id"]).reset_index(drop=True)
+    return (df.sample(n=n, random_state=seed)
+              .sort_values(["time", "inverter_id"]).reset_index(drop=True))
+
+
+def train_fill_values(train_prep, horizon_steps=4):
+    """Feature means from the training split only, used to fill every split."""
+    X, _, _, _ = get_clean_features(train_prep, horizon_steps=horizon_steps)
+    return X.mean(numeric_only=True)
+
+
+def get_clean_features(df, horizon_steps=4, fill_values=None):
     """Select feature columns and future target Health(t + 1h)."""
     feature_columns = [
         "health_now",
@@ -205,7 +241,8 @@ def get_clean_features(df, horizon_steps=4):
 
     X = df[usable_columns].copy()
     X = X.astype(np.float64)
-    X = X.fillna(X.mean(numeric_only=True))
+    # Fill with training means (fill_values); a split's own means only as a fallback
+    X = X.fillna(X.mean(numeric_only=True) if fill_values is None else fill_values[usable_columns])
 
     y_regression = df[target_lead_col].values.astype(np.float64)
     y_classification = df["status_future"].values
@@ -218,29 +255,42 @@ def get_clean_features(df, horizon_steps=4):
 # 4. Training and Evaluation Function
 # ===========================================================================
 
-def run_mlp_experiment(train_df, val_df, test_df, unseen_df=None, max_train_samples=60000, max_val_samples=30000, max_test_samples=30000):
-    """Train mlp_regressor and mlp_classifier and evaluate performance."""
-    start_total = time.time()
-    if max_train_samples and len(train_df) > max_train_samples:
-        train_df = train_df.iloc[:max_train_samples]
-    if max_val_samples and len(val_df) > max_val_samples:
-        val_df = val_df.iloc[:max_val_samples]
-    if max_test_samples and len(test_df) > max_test_samples:
-        test_df = test_df.iloc[:max_test_samples]
-    if unseen_df is not None and max_test_samples and len(unseen_df) > max_test_samples:
-        unseen_df = unseen_df.iloc[:max_test_samples]
+def balancing_winner(path=BALANCING_TABLE):
+    """Stage 5 winner from B2's balancing study (mlp_balancing.py); Method 1 if not run."""
+    if not Path(path).exists():
+        return "unbalanced"
+    table = pd.read_csv(path)
+    return str(table.loc[table["selected"].astype(bool), "strategy"].iloc[0])
 
+
+def run_mlp_experiment(train_df, val_df, test_df, unseen_df=None, max_train_samples=TRAIN_SAMPLE, log=False):
+    """Train mlp_regressor and mlp_classifier and evaluate performance.
+
+    Inputs are B2 splits from make_mlp_splits(). Only the training split is
+    sampled (seeded, all inverters and dates); validation, test and unseen
+    splits are scored in full. Missing values are filled with training means.
+    The final classifier is the Stage 5 winner (b2_balancing.csv). log=True
+    appends one row per task to results/results.csv (use once, final run).
+    """
+    from src.models.mlp_balancing import undersample_healthy
+
+    start_total = time.time()
     print("\nPreparing training, validation, and test datasets...")
-    train_df = prepare_mlp_data(train_df)
+    train_df = sample_rows(prepare_mlp_data(train_df), max_train_samples)
     val_df = prepare_mlp_data(val_df)
     test_df = prepare_mlp_data(test_df)
+    unseen_df = prepare_mlp_data(unseen_df) if unseen_df is not None and len(unseen_df) > 0 else None
 
-    X_train, y_reg_train, y_clf_train, features = get_clean_features(train_df)
-    X_val, y_reg_val, y_clf_val, _ = get_clean_features(val_df)
-    X_test, y_reg_test, y_clf_test, _ = get_clean_features(test_df)
+    fill_values = train_fill_values(train_df)
+    X_train, y_reg_train, y_clf_train, features = get_clean_features(train_df, fill_values=fill_values)
+    X_val, y_reg_val, y_clf_val, _ = get_clean_features(val_df, fill_values=fill_values)
+    X_test, y_reg_test, y_clf_test, _ = get_clean_features(test_df, fill_values=fill_values)
+    if unseen_df is not None:
+        X_unseen, y_reg_unseen, y_clf_unseen, _ = get_clean_features(unseen_df, fill_values=fill_values)
 
     print(f"Features used ({len(features)}): {features}")
-    print(f"Dataset sizes -> Train: {len(X_train)}, Val: {len(X_val)}, Test: {len(X_test)}")
+    print(f"Dataset sizes -> Train: {len(X_train)} ({train_df['inverter_id'].nunique()} inverters), "
+          f"Val: {len(X_val)}, Test: {len(X_test)}, Unseen: {0 if unseen_df is None else len(X_unseen)}")
 
     # -----------------------------------------------------------------------
     # 1. Train mlp_regressor
@@ -252,103 +302,76 @@ def run_mlp_experiment(train_df, val_df, test_df, unseen_df=None, max_train_samp
     reg_train_time = time.time() - start_reg
     print(f"  Training time: {reg_train_time:.2f} seconds ({reg_train_time / 60.0:.2f} minutes)")
 
-    # Predictions
-    train_reg_pred = mlp_regressor.predict(X_train)
-    val_reg_pred = mlp_regressor.predict(X_val)
-    test_reg_pred = mlp_regressor.predict(X_test)
-
-    # Metrics
-    train_reg_metrics = evaluate_regression(y_reg_train, train_reg_pred)
-    val_reg_metrics = evaluate_regression(y_reg_val, val_reg_pred)
-    test_reg_metrics = evaluate_regression(y_reg_test, test_reg_pred)
-
-    print(f"  Train RMSE: {train_reg_metrics['rmse']:.2f}")
-    print(f"  Val   RMSE: {val_reg_metrics['rmse']:.2f}")
-    print(f"  Test  RMSE: {test_reg_metrics['rmse']:.2f}")
-
-    # Unseen stations for regressor
-    unseen_reg_score = "-"
-    if unseen_df is not None and len(unseen_df) > 0:
-        unseen_df = prepare_mlp_data(unseen_df)
-        X_unseen, y_reg_unseen, _, _ = get_clean_features(unseen_df)
-        unseen_reg_pred = mlp_regressor.predict(X_unseen)
-        unseen_reg_metrics = evaluate_regression(y_reg_unseen, unseen_reg_pred)
-        unseen_reg_score = f"RMSE: {unseen_reg_metrics['rmse']:.2f}"
-        print(f"  Unseen Stations RMSE: {unseen_reg_metrics['rmse']:.2f}")
-
-    # Log regressor result
-    log_experiment(
-        student="B2",
-        model_name="MLPRegressor",
-        task="regression",
-        train_score=f"RMSE: {train_reg_metrics['rmse']:.2f}",
-        val_score=f"RMSE: {val_reg_metrics['rmse']:.2f}",
-        test_score=f"RMSE: {test_reg_metrics['rmse']:.2f}",
-        unseen_score=unseen_reg_score,
-        notes=f"Trained in {reg_train_time:.1f}s, (64, 32) hidden layers, Adam, ReLU",
-    )
+    reg_pred = {"train": mlp_regressor.predict(X_train), "val": mlp_regressor.predict(X_val),
+                "test": mlp_regressor.predict(X_test)}
+    reg_metrics = {"train": evaluate_regression(y_reg_train, reg_pred["train"]),
+                   "val": evaluate_regression(y_reg_val, reg_pred["val"]),
+                   "test": evaluate_regression(y_reg_test, reg_pred["test"])}
+    if unseen_df is not None:
+        reg_pred["unseen"] = mlp_regressor.predict(X_unseen)
+        reg_metrics["unseen"] = evaluate_regression(y_reg_unseen, reg_pred["unseen"])
+    for name, m in reg_metrics.items():
+        print(f"  {name:6s} RMSE: {m['rmse']:.2f} | MAE: {m['mae']:.2f} | R2: {m['r2']:.3f}")
+    persistence = {name: evaluate_regression(part[f"health_score_lead4"], part["health_now"])["rmse"]
+                   for name, part in [("train", train_df), ("val", val_df), ("test", test_df)]
+                   + ([("unseen", unseen_df)] if unseen_df is not None else [])}
+    print("  Persistence RMSE: " + " | ".join(f"{k} {v:.2f}" for k, v in persistence.items()))
 
     # -----------------------------------------------------------------------
     # 2. Train mlp_classifier (Method 1: Dedicated Classifier)
     # -----------------------------------------------------------------------
-    print("\n[Step 2] Training mlp_classifier (Method 1: Softmax)...")
+    winner = balancing_winner()
+    print(f"\n[Step 2] Training mlp_classifier (Method 1: Softmax); Stage 5 winner: {winner}...")
     start_clf = time.time()
     mlp_classifier = build_mlp_classifier()
-    mlp_classifier.fit(X_train, y_clf_train)
+    if winner == "undersampling":
+        mlp_classifier.fit(*undersample_healthy(X_train, y_clf_train))
+    else:
+        mlp_classifier.fit(X_train, y_clf_train)
     clf_train_time = time.time() - start_clf
     print(f"  Training time: {clf_train_time:.2f} seconds ({clf_train_time / 60.0:.2f} minutes)")
-
-    train_clf_pred = mlp_classifier.predict(X_train)
-    val_clf_pred = mlp_classifier.predict(X_val)
-    test_clf_pred = mlp_classifier.predict(X_test)
-
-    train_clf_metrics = evaluate_classification(y_clf_train, train_clf_pred)
-    val_clf_metrics = evaluate_classification(y_clf_val, val_clf_pred)
-    test_clf_metrics = evaluate_classification(y_clf_test, test_clf_pred)
-
-    print(f"  Method 1 Test Macro-F1: {test_clf_metrics['macro_f1']:.2f}")
-    print(f"  Method 1 Faulty Recall: {test_clf_metrics['faulty_recall']:.2f}")
-
-    # Unseen stations for classifier
-    unseen_clf_score = "-"
-    if unseen_df is not None and len(unseen_df) > 0:
-        unseen_df = prepare_mlp_data(unseen_df)
-        X_unseen, _, y_clf_unseen, _ = get_clean_features(unseen_df)
-        unseen_clf_pred = mlp_classifier.predict(X_unseen)
-        unseen_clf_metrics = evaluate_classification(y_clf_unseen, unseen_clf_pred)
-        unseen_clf_score = f"F1: {unseen_clf_metrics['macro_f1']:.2f}"
-        print(f"  Unseen Stations Macro-F1: {unseen_clf_metrics['macro_f1']:.2f}")
-
-    # Log classifier result
-    log_experiment(
-        student="B2",
-        model_name="MLPClassifier",
-        task="classification",
-        train_score=f"F1: {train_clf_metrics['macro_f1']:.2f}",
-        val_score=f"F1: {val_clf_metrics['macro_f1']:.2f}",
-        test_score=f"F1: {test_clf_metrics['macro_f1']:.2f}",
-        unseen_score=unseen_clf_score,
-        notes=f"Trained in {clf_train_time:.1f}s, Dedicated Softmax across Healthy, Warning, Faulty",
-    )
 
     # -----------------------------------------------------------------------
     # 3. Method 2: Thresholded Output from mlp_regressor
     # -----------------------------------------------------------------------
-    print("\n[Step 3] Evaluating Method 2 (Thresholded mlp_regressor)...")
-    method2_test_pred = threshold_health_score(test_reg_pred)
-    method2_metrics = evaluate_classification(y_clf_test, method2_test_pred)
+    splits = {"train": (X_train, y_clf_train), "val": (X_val, y_clf_val), "test": (X_test, y_clf_test)}
+    if unseen_df is not None:
+        splits["unseen"] = (X_unseen, y_clf_unseen)
+    method1 = {name: evaluate_classification(y, mlp_classifier.predict(X)) for name, (X, y) in splits.items()}
+    method2 = {name: evaluate_classification(y, threshold_health_score(reg_pred[name]))
+               for name, (_, y) in splits.items()}
+    final = method2 if winner == "thresholded_regressor" else method1
+    final_name = "thresholded regressor (Method 2)" if winner == "thresholded_regressor" else \
+        f"dedicated classifier (Method 1, {winner})"
+    for label, metrics in [("Method 1", method1), ("Method 2", method2)]:
+        print(f"  {label} test Macro-F1: {metrics['test']['macro_f1']:.2f} | "
+              f"Faulty Recall: {metrics['test']['faulty_recall']:.2f}")
+    print(f"  Final classification model (Stage 5 winner): {final_name}")
 
-    print(f"  Method 2 Test Macro-F1: {method2_metrics['macro_f1']:.2f}")
-    print(f"  Method 2 Faulty Recall: {method2_metrics['faulty_recall']:.2f}")
+    if log:
+        unseen = "unseen" in reg_metrics
+        log_experiment(
+            student="B2", model_name="MLPRegressor", task="regression",
+            train_score=f"RMSE: {reg_metrics['train']['rmse']:.2f}",
+            val_score=f"RMSE: {reg_metrics['val']['rmse']:.2f}",
+            test_score=f"RMSE: {reg_metrics['test']['rmse']:.2f}",
+            unseen_score=f"RMSE: {reg_metrics['unseen']['rmse']:.2f}" if unseen else "-",
+            notes=f"Health(t+1h) forecast; hidden={BEST_HIDDEN_LAYERS}, Adam, ReLU; "
+                  f"{len(X_train):,} random train rows ({reg_train_time:.1f}s)",
+        )
+        fmt = lambda m: f"F1: {m['macro_f1']:.2f}, Faulty recall: {m['faulty_recall']:.2f}"
+        log_experiment(
+            student="B2", model_name="MLPClassifier", task="classification",
+            train_score=fmt(final["train"]), val_score=fmt(final["val"]), test_score=fmt(final["test"]),
+            unseen_score=fmt(final["unseen"]) if unseen else "-",
+            notes=f"Status(t+1h) forecast; {final_name}, Stage 5 winner",
+        )
 
     total_time = time.time() - start_total
-
     print("\n--- Summary Comparison & Execution Time ---")
-    print(f"Method 1 Faulty Recall:       {test_clf_metrics['faulty_recall']:.2f}")
-    print(f"Method 2 Faulty Recall:       {method2_metrics['faulty_recall']:.2f}")
-    print(f"mlp_regressor training time:  {reg_train_time:.2f} seconds ({reg_train_time / 60.0:.2f} mins)")
-    print(f"mlp_classifier training time: {clf_train_time:.2f} seconds ({clf_train_time / 60.0:.2f} mins)")
-    print(f"Total pipeline time:          {total_time:.2f} seconds ({total_time / 60.0:.2f} mins)")
+    print(f"Method 1 Faulty Recall (test): {method1['test']['faulty_recall']:.2f}")
+    print(f"Method 2 Faulty Recall (test): {method2['test']['faulty_recall']:.2f}")
+    print(f"Total pipeline time:           {total_time:.2f} seconds ({total_time / 60.0:.2f} mins)")
 
     return mlp_regressor, mlp_classifier
 
@@ -359,10 +382,12 @@ def run_mlp_experiment(train_df, val_df, test_df, unseen_df=None, max_train_samp
 
 def tune_mlp_regressor(X_train, y_train, sample_fraction=0.15, random_state=42, **kwargs):
     """Exhaustively tune MLPRegressor across all parameter combinations using GridSearchCV with TimeSeriesSplit."""
-    # 1. Take a time-ordered sample to keep laptop runtimes reasonable
+    # 1. Seeded random sample (all inverters), kept in time order for TimeSeriesSplit
     n_samples = max(1000, int(len(X_train) * sample_fraction))
-    X_sample = X_train.iloc[:n_samples]
-    y_sample = y_train[:n_samples]
+    rows = np.sort(np.random.RandomState(random_state).choice(len(X_train), size=min(n_samples, len(X_train)),
+                                                             replace=False))
+    X_sample = X_train.iloc[rows]
+    y_sample = y_train[rows]
 
     base_pipeline = build_mlp_regressor(random_state=random_state)
 
@@ -406,19 +431,20 @@ def tune_mlp_regressor(X_train, y_train, sample_fraction=0.15, random_state=42, 
     return search.best_params_
 
 
-def run_tuning_experiment(train_df, val_df, test_df, unseen_df=None):
-    """Run full hyperparameter tuning, refit on 100% full dataset, and compare Default vs Tuned."""
+def run_tuning_experiment(train_df, val_df, test_df, unseen_df=None, max_train_samples=TRAIN_SAMPLE, log=False):
+    """Tune on a sample of the training rows, refit on the training sample, and compare Default vs Tuned."""
     print("\n" + "=" * 60)
     print("STAGE 10: HYPERPARAMETER TUNING FOR MLP REGRESSOR (GRIDSEARCH)")
     print("=" * 60)
 
-    train_df = prepare_mlp_data(train_df)
+    train_df = sample_rows(prepare_mlp_data(train_df), max_train_samples)
     val_df = prepare_mlp_data(val_df)
     test_df = prepare_mlp_data(test_df)
 
-    X_train, y_reg_train, _, features = get_clean_features(train_df)
-    X_val, y_reg_val, _, _ = get_clean_features(val_df)
-    X_test, y_reg_test, _, _ = get_clean_features(test_df)
+    fill_values = train_fill_values(train_df)
+    X_train, y_reg_train, _, features = get_clean_features(train_df, fill_values=fill_values)
+    X_val, y_reg_val, _, _ = get_clean_features(val_df, fill_values=fill_values)
+    X_test, y_reg_test, _, _ = get_clean_features(test_df, fill_values=fill_values)
 
     # 1. Run exhaustive search across all combinations on sample
     best_params = tune_mlp_regressor(X_train, y_reg_train, sample_fraction=0.15)
@@ -426,8 +452,8 @@ def run_tuning_experiment(train_df, val_df, test_df, unseen_df=None):
     # Clean parameter names (strip 'mlp__' prefix)
     cleaned_params = {k.replace("mlp__", ""): v for k, v in best_params.items()}
 
-    # 2. Refit winning model on 100% FULL training dataset (523,908 rows)
-    print(f"\n[Refit] Refitting best configuration on FULL {len(X_train):,} training rows...")
+    # 2. Refit winning model on the training sample
+    print(f"\n[Refit] Refitting best configuration on {len(X_train):,} training rows...")
     start_refit = time.time()
     mlp_regressor_tuned = build_mlp_regressor(**cleaned_params)
     mlp_regressor_tuned.fit(X_train, y_reg_train)
@@ -441,34 +467,42 @@ def run_tuning_experiment(train_df, val_df, test_df, unseen_df=None):
     val_metrics = evaluate_regression(y_reg_val, val_pred)
     test_metrics = evaluate_regression(y_reg_test, test_pred)
 
-    unseen_score = "-"
+    X_unseen = None
     if unseen_df is not None and len(unseen_df) > 0:
         unseen_df = prepare_mlp_data(unseen_df)
-        X_unseen, y_reg_unseen, _, _ = get_clean_features(unseen_df)
-        unseen_pred = mlp_regressor_tuned.predict(X_unseen)
-        unseen_metrics = evaluate_regression(y_reg_unseen, unseen_pred)
-        unseen_score = f"RMSE: {unseen_metrics['rmse']:.2f}"
+        X_unseen, y_reg_unseen, _, _ = get_clean_features(unseen_df, fill_values=fill_values)
 
-    # Log tuned model result to results/results.csv
-    log_experiment(
-        student="B2",
-        model_name="MLPRegressor (Tuned)",
-        task="regression",
-        train_score="-",
-        val_score=f"RMSE: {val_metrics['rmse']:.2f}",
-        test_score=f"RMSE: {test_metrics['rmse']:.2f}",
-        unseen_score=unseen_score,
-        notes=f"Tuned: hidden={cleaned_params.get('hidden_layer_sizes')}, lr={cleaned_params.get('learning_rate_init')}, alpha={cleaned_params.get('alpha')}",
-    )
+    # 4. Default configuration (64, 32), lr 0.001, scored on the same rows
+    mlp_default = build_mlp_regressor(hidden_layer_sizes=(64, 32), learning_rate_init=0.001)
+    mlp_default.fit(X_train, y_reg_train)
+    rows = []
+    for label, model in [("Default (64, 32)", mlp_default), ("Tuned (Best Params)", mlp_regressor_tuned)]:
+        row = {"configuration": label,
+               "val_rmse": evaluate_regression(y_reg_val, model.predict(X_val))["rmse"],
+               "test_rmse": evaluate_regression(y_reg_test, model.predict(X_test))["rmse"]}
+        if X_unseen is not None:
+            row["unseen_rmse"] = evaluate_regression(y_reg_unseen, model.predict(X_unseen))["rmse"]
+        rows.append(row)
+    comparison = pd.DataFrame(rows)
+    comparison.to_csv(ROOT / "reports" / "tables" / "b2_mlp_default_vs_tuned.csv", index=False)
 
-    # 4. Display comparison table
+    if log:
+        tuned = comparison.iloc[1]
+        log_experiment(
+            student="B2",
+            model_name="MLPRegressor (Tuned)",
+            task="regression",
+            train_score="-",
+            val_score=f"RMSE: {tuned['val_rmse']:.2f}",
+            test_score=f"RMSE: {tuned['test_rmse']:.2f}",
+            unseen_score=f"RMSE: {tuned['unseen_rmse']:.2f}" if "unseen_rmse" in tuned else "-",
+            notes=f"Tuned: hidden={cleaned_params.get('hidden_layer_sizes')}, lr={cleaned_params.get('learning_rate_init')}, alpha={cleaned_params.get('alpha')}",
+        )
+
     print("\n" + "=" * 65)
     print("HYPERPARAMETER TUNING COMPARISON TABLE")
     print("=" * 65)
-    print(f"{'Configuration':<25} | {'Val RMSE':<12} | {'Test RMSE':<12} | {'Unseen RMSE'}")
-    print("-" * 65)
-    print(f"{'Default (64, 32)':<25} | {'3.54':<12} | {'5.70':<12} | {'7.96'}")
-    print(f"{'Tuned (Best Params)':<25} | {val_metrics['rmse']:<12.2f} | {test_metrics['rmse']:<12.2f} | {unseen_score}")
+    print(comparison.to_string(index=False))
     print("=" * 65)
 
     return mlp_regressor_tuned, best_params
@@ -592,11 +626,12 @@ def run_explainability_analysis(train_df, test_df, model=None):
     print("STAGE 11 / TASK 7: MODEL EXPLAINABILITY & ERROR ANALYSIS")
     print("=" * 60)
 
-    train_df = prepare_mlp_data(train_df)
+    train_df = sample_rows(prepare_mlp_data(train_df), TRAIN_SAMPLE)
     test_df = prepare_mlp_data(test_df)
 
-    X_train, y_reg_train, _, features = get_clean_features(train_df)
-    X_test, y_reg_test, _, _ = get_clean_features(test_df)
+    fill_values = train_fill_values(train_df)
+    X_train, y_reg_train, _, features = get_clean_features(train_df, fill_values=fill_values)
+    X_test, y_reg_test, _, _ = get_clean_features(test_df, fill_values=fill_values)
 
     if model is None:
         print("\nTraining tuned MLP Regressor for explainability analysis...")
@@ -665,11 +700,11 @@ if __name__ == "__main__":
         dataset = pd.read_parquet(parquet_file)
 
 
-    # 1. Chronological split (2021-mid 2022 train, mid-end 2022 val, 2023 test)
-    train_split, val_split, test_split = split_chronological(dataset)
-
-    # 2. Unseen stations split
-    _, unseen_split = split_unseen_stations(dataset)
+    # 1-2. B2's chronological and unseen-station splits (held-out inverters not in train/val)
+    splits = make_mlp_splits(dataset)
+    train_split, val_split, test_split, unseen_split = (
+        splits[k] for k in ["train", "val", "test", "test_unseen"])
+    log = "--log" in sys.argv
 
     # 3. Check CLI arguments
     if "--tune" in sys.argv:
@@ -679,6 +714,7 @@ if __name__ == "__main__":
             val_df=val_split,
             test_df=test_split,
             unseen_df=unseen_split,
+            log=log,
         )
     elif "--explain" in sys.argv:
         print("\nMode: Running Task 7 Model Explainability & Error Analysis...")
@@ -693,9 +729,10 @@ if __name__ == "__main__":
             val_df=val_split,
             test_df=test_split,
             unseen_df=unseen_split,
+            log=log,
         )
 
     print("\n" + "=" * 60)
-    print("Execution Finished! Results logged to results/results.csv")
+    print("Execution Finished!" + (" Results logged to results/results.csv" if log else " (use --log to write results.csv)"))
     print("=" * 60)
 

@@ -5,9 +5,9 @@ Majority class,classification,train,260819,,,,260819,0.3064,0.0,0.0,"[[0, 17530,
 Persistence,regression,val,182731,6.325,13.074,0.474,182731,,,,
 Current status rule,classification,val,182731,,,,182731,0.5955,0.6483,0.5469,"[[11592, 3709, 2580], [5132, 125669, 14004], [4473, 8968, 6604]]"
 Majority class,classification,val,182731,,,,182731,0.2947,0.0,0.0,"[[0, 17881, 0], [0, 144805, 0], [0, 20045, 0]]"
-Persistence,regression,test,441205,11.54,16.878,0.314,441205,,,,
-Current status rule,classification,test,441205,,,,441205,0.6365,0.7461,0.7015,"[[150950, 10309, 41050], [13912, 43520, 20475], [50305, 15982, 94702]]"
-Majority class,classification,test,441205,,,,441205,0.1001,0.0,0.0,"[[0, 202309, 0], [0, 77907, 0], [0, 160989, 0]]"
-Persistence,regression,test_unseen,44634,11.994,17.268,-0.1,44634,,,,
-Current status rule,classification,test_unseen,44634,,,,44634,0.5225,0.5846,0.5139,"[[7602, 1145, 4257], [1576, 2735, 3720], [5615, 2812, 15172]]"
-Majority class,classification,test_unseen,44634,,,,44634,0.1017,0.0,0.0,"[[0, 13004, 0], [0, 8031, 0], [0, 23599, 0]]"
+Persistence,regression,test,366110,5.248,12.35,0.399,366110,,,,
+Current status rule,classification,test,366110,,,,366110,0.5922,0.6007,0.5638,"[[19465, 7445, 5494], [8675, 274312, 19811], [6382, 15364, 9162]]"
+Majority class,classification,test,366110,,,,366110,0.3018,0.0,0.0,"[[0, 32404, 0], [0, 302798, 0], [0, 30908, 0]]"
+Persistence,regression,test_unseen,37060,3.083,10.728,0.122,37060,,,,
+Current status rule,classification,test_unseen,37060,,,,37060,0.4728,0.3666,0.3088,"[[327, 494, 71], [608, 32881, 1375], [124, 984, 196]]"
+Majority class,classification,test_unseen,37060,,,,37060,0.3232,0.0,0.0,"[[0, 892, 0], [0, 34864, 0], [0, 1304, 0]]"
