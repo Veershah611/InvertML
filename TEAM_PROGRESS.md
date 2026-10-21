@@ -7,7 +7,7 @@
 | 2 | Data acquisition | Done: column table, findings, licence (CC0) | — | — | To do: GPVS-Faults loader |
 | 3 | Data preparation | Done (lead): metadata, Parquet, 15-min resample, merge, gap analysis, before/after table. To do: share `hkust_15min_v1.parquet` | — | — | — |
 | 4 | Preprocessing | — | Implemented: physical cleaning, B2 splits, B1 physical-feature integration, mean/median validation comparison, train-only encoding/scaling (`src/preprocess.py`). Gaps preserved; see `reports/A2_PREPROCESSING.md` for interpolation policy and limitations. | — | — |
-| 5 | Balancing | To do | Done: class weights vs Healthy undersampling; class weights selected by validation Faulty recall (`reports/A2_RESULTS.md`) | To do | To do |
+| 5 | Balancing | Done: class weights vs Healthy undersampling (`reports/tables/a1_balancing.csv`) | Done: class weights vs Healthy undersampling; class weights selected by validation Faulty recall (`reports/A2_RESULTS.md`) | To do | Done: unbalanced vs Healthy undersampling vs thresholded regressor; thresholded regressor selected by validation Faulty recall (`reports/tables/b2_balancing.csv`) |
 | 6 | EDA | Done: power vs. irradiance; gap heatmap (`notebooks/01_eda_A1.ipynb`) | Done: temperature, correlation and season class shift (`reports/A2_EDA.md`) | Done: degradation; underperformers (`notebooks/01_eda_B1.ipynb`) | Done: seasonality; class distribution (`notebooks/01_eda_B2.ipynb`) |
 | 7 | Features | To do: outage features | Done: exact-time PR/peer lags and past-only rolling features (`src/features.py`) | Done (lead): PR, deviations, target, selection (`src/features.py`, `src/targets.py`) | Done: time + metadata (`src/features.py`) |
 | 8 | Baselines | Done (lead): persistence, Ridge, majority, rule, Logistic (`src/models/linear.py`); re-run after target fix | — | — | — |
@@ -23,7 +23,7 @@
 - **A1:** Stage 5 balancing (done); Stage 7 outage features (done); Stage 11 evaluation of Ridge/Logistic (done); HKUST Isolation Forest (done); joint review of A2's Isolation Forest benchmark.
 - **A2:** Joint Isolation Forest review with A1.
 - **B1:** Stage 5 balancing; re-run XGBoost after the target issue below is fixed, then update `reports/Section_09_10_XGBoost.md` and `reports/B1_VIVA_PREP.md`.
-- **B2:** Stage 5 balancing; Stage 12 impact & limitations (done: `reports/Section_14_Impact.md`); AI-usage log (done: `reports/AI_Usage_Log.md`).
+- **B2:** Stage 5 balancing (done: `reports/tables/b2_balancing.csv`); Stage 12 impact & limitations (done: `reports/Section_14_Impact.md`); AI-usage log (done: `reports/AI_Usage_Log.md`); Stage 11 synthesis report (`reports/Section_11_Evaluation.md`).
 - **Everyone:** Update remaining cells in progress matrix.
 
 ## Open issues
