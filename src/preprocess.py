@@ -22,7 +22,10 @@ from src.evaluate import (
     CONFIG, DEFAULT_UNSEEN_STATIONS, evaluate_classification,
     evaluate_regression, split_chronological, split_unseen_stations,
 )
-from src.features import B1_CORE_FEATURES, add_time_features, build_b1_features
+from src.features import (
+    A2_HISTORY_FEATURES, B1_CORE_FEATURES, add_a2_history_features,
+    add_time_features, build_b1_features,
+)
 from src.targets import (
     MIN_IRRADIANCE_DAYLIGHT, assign_operational_status, compute_health_score,
 )
@@ -34,7 +37,7 @@ BASE_NUMERIC_FEATURES = [
     "capacity_kwp", "tilt_deg", "altitude_m", "n_valid_5min",
     "hour_sin", "hour_cos", "day_sin", "day_cos",
 ]
-NUMERIC_FEATURES = BASE_NUMERIC_FEATURES + B1_CORE_FEATURES
+NUMERIC_FEATURES = BASE_NUMERIC_FEATURES + B1_CORE_FEATURES + A2_HISTORY_FEATURES
 CATEGORICAL_FEATURES = ["azimuth"]
 FEATURES = NUMERIC_FEATURES + CATEGORICAL_FEATURES
 WEATHER_BOUNDS = {
@@ -175,7 +178,7 @@ def engineer_b2_partitions(partitions):
             ].copy()
             prior["_a2_current"] = False
             context = pd.concat([prior, context], ignore_index=True)
-        enriched = build_b1_features(context)
+        enriched = add_a2_history_features(build_b1_features(context))
         engineered[name] = enriched.loc[enriched["_a2_current"]].drop(
             columns="_a2_current"
         ).sort_values(["time", "inverter_id"]).reset_index(drop=True)
@@ -349,6 +352,7 @@ def run(input_path, output_dir, compare=True):
         "selected_imputation": strategy, "imputation_comparison_run": compare,
         "features": FEATURES, "splitting": "src.evaluate B2 functions",
         "b1_features": B1_CORE_FEATURES,
+        "a2_history_features": A2_HISTORY_FEATURES,
         "self_history": "Observed preceding 30 calendar days; same irradiance bin",
         "peer_population": "Known inverters in train/val; all test inverters at inference",
         "holdout_unit": "inverter_id", "test_includes_unseen": True,

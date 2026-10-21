@@ -72,6 +72,20 @@ B1_CORE_FEATURES = [
     "temp_delta_stc",
 ]
 
+A2_HISTORY_SOURCES = ["performance_ratio", "peer_dev_campus"]
+A2_LAG_STEPS = {"15m": pd.Timedelta("15min"),
+                "1h": pd.Timedelta("1h"), "1d": pd.Timedelta("1d")}
+A2_ROLLING_WINDOWS = {"1h": "1h", "4h": "4h", "1d": "1D"}
+A2_HISTORY_FEATURES = [
+    f"{source}_lag_{name}"
+    for source in A2_HISTORY_SOURCES for name in A2_LAG_STEPS
+] + [
+    f"{source}_roll_{name}_{stat}"
+    for source in A2_HISTORY_SOURCES
+    for name in A2_ROLLING_WINDOWS
+    for stat in ("mean", "std")
+]
+
 # All Candidate Features prior to selection
 ALL_CANDIDATE_FEATURES = B2_ALL_FEATURES + B1_CORE_FEATURES
 
@@ -404,6 +418,45 @@ def build_b1_features(df, time_col="time", inverter_col="inverter_id",
     df = add_self_relative_deviation_features(df, inverter_col=inverter_col,
                                              time_col=time_col)
     return add_weather_interaction_features(df)
+
+
+def add_a2_history_features(df, inverter_col="inverter_id", time_col="time"):
+    """Exact-time lags and past-only 1h/4h/1d windows per inverter.
+
+    The source frame may include missing/offline rows. Values are not forward
+    filled; missing exact timestamps remain missing. The current row is excluded
+    from rolling windows. Historical context must be supplied before filtering
+    the requested prediction rows, including at chronological split boundaries.
+    """
+    required = {inverter_col, time_col, *A2_HISTORY_SOURCES}
+    if missing := required.difference(df.columns):
+        raise ValueError(f"Missing A2 history inputs: {sorted(missing)}")
+    out = df.copy()
+    out[time_col] = pd.to_datetime(out[time_col])
+    if out.duplicated([inverter_col, time_col]).any():
+        raise ValueError("Duplicate inverter/timestamp rows in A2 history")
+    # Positional key preserves the caller's original row order and index.
+    out["_a2_position"] = np.arange(len(out))
+    ordered = out.sort_values([inverter_col, time_col])
+    lookup = ordered.set_index([inverter_col, time_col])[A2_HISTORY_SOURCES]
+    for label, delta in A2_LAG_STEPS.items():
+        earlier = pd.MultiIndex.from_arrays(
+            [ordered[inverter_col], ordered[time_col] - delta],
+            names=[inverter_col, time_col],
+        )
+        values = lookup.reindex(earlier)
+        for source in A2_HISTORY_SOURCES:
+            ordered[f"{source}_lag_{label}"] = values[source].to_numpy(dtype="float32")
+    for source in A2_HISTORY_SOURCES:
+        for _, group in ordered.groupby(inverter_col, sort=False, observed=True):
+            series = group.set_index(time_col)[source].astype("float32")
+            for label, window in A2_ROLLING_WINDOWS.items():
+                past = series.rolling(window, closed="left", min_periods=1)
+                ordered.loc[group.index, f"{source}_roll_{label}_mean"] = past.mean().to_numpy()
+                ordered.loc[group.index, f"{source}_roll_{label}_std"] = past.std().to_numpy()
+    for col in A2_HISTORY_FEATURES:
+        ordered[col] = ordered[col].astype("float32")
+    return ordered.sort_values("_a2_position").drop(columns="_a2_position").set_axis(df.index)
 
 
 def build_all_features(

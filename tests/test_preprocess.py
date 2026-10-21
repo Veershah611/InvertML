@@ -9,7 +9,7 @@ from src.preprocess import (
     NUMERIC_FEATURES, build_preprocessor, clean_measurements, feature_frame,
     forecasting_rows, make_b2_splits, time_series_folds,
 )
-from src.features import build_b1_features
+from src.features import add_a2_history_features, build_b1_features
 
 
 def example(times, inverter="known"):
@@ -66,9 +66,9 @@ class PreprocessingTests(unittest.TestCase):
         self.assertEqual(len(forecasting_rows(splits["train"])), 1)
 
     def test_imputer_scaler_and_categories_fit_training_only(self):
-        train = build_b1_features(clean_measurements(
+        train = add_a2_history_features(build_b1_features(clean_measurements(
             example(pd.date_range("2022-01-01 09:00", periods=3, freq="15min"))
-        ))
+        )))
         train["temp_c"] = [10.0, 20.0, np.nan]
         val = train.copy()
         val["temp_c"] = [1000.0, np.nan, 2000.0]
