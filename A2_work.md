@@ -271,8 +271,9 @@ unchanged. Regression needs error analysis across health-score ranges rather tha
 class balancing.
 
 The comparison is in `reports/tables/a2_balancing.csv`. Class weights gave
-Faulty recall 0.6651; undersampling gave 0.6174 on the same validation rows.
-Undersampling had higher macro-F1 (0.6736 versus 0.6436). The main classifier
+Faulty recall 0.6637; undersampling gave 0.6263 on the same validation rows.
+Undersampling had higher macro-F1 (0.6774 versus 0.6443; re-run 2026-10-21
+on the corrected target). The main classifier
 uses class weights because missed Faulty cases are the stated priority. SMOTE
 was assessed but not applied: interpolating time-adjacent states can produce
 implausible telemetry, and any resampling must stay inside training folds.
@@ -342,8 +343,8 @@ validation rows. Test scores were not used to choose imputation.
 |---|---:|---:|---:|---:|
 | Median, before A2 history features | 10.350 | 5.874 | 0.6272 | 0.6780 |
 | Mean, before A2 history features | 10.351 | 5.878 | 0.6246 | 0.6746 |
-| Median, with A2 history features | 10.114 | 5.619 | 0.6374 | 0.6692 |
-| Mean, with A2 history features | 10.121 | 5.621 | 0.6410 | 0.6698 |
+| Median, with A2 history features (re-run 2026-10-21) | 10.111 | 5.617 | 0.6382 | 0.6596 |
+| Mean, with A2 history features (re-run 2026-10-21) | 10.120 | 5.620 | 0.6406 | 0.6678 |
 
 After adding history features, **mean** was selected using macro-F1, with RMSE
 as a tie-breaker. The differences are small and are not a
@@ -433,25 +434,27 @@ See `reports/A2_EDA.md` for findings. The temperature/PR association is mixed;
 the 39-to-37-feature pruning check has nearly tied validation scores across
 the two tasks, so all inputs remain in the main model.
 
-The balancing comparison on the same validation rows gave macro-F1 0.6436 and
-Faulty recall 0.6651 with class weights, versus 0.6736 and 0.6174 with
+The balancing comparison on the same validation rows gave macro-F1 0.6443 and
+Faulty recall 0.6637 with class weights, versus 0.6774 and 0.6263 with
 undersampling. The main classifier uses class weights because catching Faulty
 cases is the project's stated priority. SMOTE is not used: interpolating nearby
 time-series rows can produce implausible synthetic operating states and would
 need fold-specific resampling.
 
-The A2 Isolation Forest benchmark detected 36 of 108 injected-fault rows and
-flagged 2,396 of 12,345 control rows. That is 33.33% detection and a 19.41%
-false-alarm rate; it is not strong evidence for deployment. A1 should review
-the paired benchmark before it is described as a team result.
+The A2 Isolation Forest benchmark detected 64 of 137 injected-fault rows and
+flagged 2,042 of 38,842 control rows. That is 46.72% detection and a 5.26%
+false-alarm rate on the corrected target; it is not strong evidence for
+deployment. A1 reviewed the paired benchmark and extended it in
+`src/models/iforest_a1.py` (validation tuning, peer-deviation input).
 
-The selected untuned RF regressor has validation RMSE 9.953 and 2023 test RMSE
-21.845. The selected untuned classifier has validation macro-F1 0.6597,
-Faulty recall 0.6452; on the 2023 test these fall to 0.4615 and 0.4061.
+The selected untuned RF regressor has validation RMSE 9.913 and 2023 test RMSE
+9.731. The selected untuned classifier has validation macro-F1 0.6534,
+Faulty recall 0.6226; on the 2023 test these are 0.6122 and 0.5708.
 The tuned variants did not improve the validation criterion used for selection.
-Simple persistence and current-status baselines beat the forests on 2023 data.
-See `reports/A2_RESULTS.md` for the complete comparison and the large change
-around the documented February 2023 irradiance sensor replacement.
+On the corrected target the forests beat the persistence and current-status
+baselines on 2023 data, and the RF regressor is the project's selected health
+forecaster. See `reports/A2_RESULTS.md` and `reports/Final_Model_Comparison.md`.
+(Before the 2026-10-21 target fix, test RMSE was 21.845 and the baselines won.)
 
 ## 16. Questions to prepare for your viva
 
@@ -465,7 +468,7 @@ distributions influence the values and categories learned during training.
 thresholds and generally do not require comparable feature scales.
 
 **Why mean imputation?** With history features, mean gave higher validation
-macro-F1 than median (0.6410 versus 0.6374), so the final A2 models use mean.
+macro-F1 than median (0.6406 versus 0.6382), so the final A2 models use mean.
 The difference is small and limited to this comparison.
 
 **Why leave missing power unlabeled?** Absence of telemetry does not tell us the
@@ -479,5 +482,5 @@ clear chronological boundary across the simultaneous campus observations.
 
 **What are the main limitations?** Labels are engineered; missing telemetry is
 not evaluated as a supervised forecast target; the holdout is at inverter level;
-and A1's documented February 2023 irradiance sensor change remains unresolved
-and affects B1's labels.
+and A1's documented February 2023 irradiance sensor change is corrected with
+one factor estimated from test-year data.

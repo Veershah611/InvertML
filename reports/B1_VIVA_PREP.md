@@ -2,10 +2,10 @@
 
 **Candidate:** Partner B1 (Feature Specialist & XGBoost Track Lead)  
 **Project:** InvertML — Solar Photovoltaic Inverter Health Monitoring & Fault Detection  
-**Core Modules Owned:** [`src/features.py`](file:///Users/hettala/Downloads/ML%20ass/src/features.py), [`src/targets.py`](file:///Users/hettala/Downloads/ML%20ass/src/targets.py), [`src/models/xgb.py`](file:///Users/hettala/Downloads/ML%20ass/src/models/xgb.py), [`notebooks/01_eda_B1.ipynb`](file:///Users/hettala/Downloads/ML%20ass/notebooks/01_eda_B1.ipynb), [`notebooks/03_xgb_B1.ipynb`](file:///Users/hettala/Downloads/ML%20ass/notebooks/03_xgb_B1.ipynb)  
-**Co-owned Module:** [`src/models/iforest.py`](file:///Users/hettala/Downloads/ML%20ass/src/models/iforest.py) (Pair B Real-Fault GPVS Benchmark)
+**Core Modules Owned:** [`src/features.py`](../src/features.py), [`src/targets.py`](../src/targets.py), [`src/models/xgb.py`](../src/models/xgb.py), [`notebooks/01_eda_B1.ipynb`](../notebooks/01_eda_B1.ipynb), [`notebooks/03_xgb_B1.ipynb`](../notebooks/03_xgb_B1.ipynb)  
+**Co-owned Module:** [`src/models/iforest.py`](../src/models/iforest.py) (Pair B Real-Fault GPVS Benchmark)
 
-> **Correction (2026-10-21).** Earlier versions of this guide quoted XGBoost test RMSE 0.30 and 100% Faulty recall. Those came from target leakage (the model predicted Health(t) from PR-based features at the same t). XGBoost now forecasts Health(t + 1 h) (Option A). The numbers below are from the fixed run; see `reports/Section_09_10_XGBoost.md`.
+> **Correction (2026-10-21).** Earlier versions of this guide quoted XGBoost test RMSE 0.30 and 100% Faulty recall. Those came from target leakage (the model predicted Health(t) from PR-based features at the same t). XGBoost now forecasts Health(t + 1 h) (Option A). The numbers below are from the final re-run on the corrected target (irradiance rescaled after 2023-02-14, undefined health for missing power); see `reports/Section_09_10_XGBoost.md` and `reports/Final_Model_Comparison.md`.
 
 ---
 
@@ -18,7 +18,7 @@
 > 2. *Conducted Stage 6 EDA to quantify long-term 3-year panel degradation rates and identify persistently underperforming campus rooftop stations.*
 > 3. *Engineered domain-specific physical features—most notably **Peer-Deviation** (which cancels dynamic passing cloud weather noise by comparing co-located inverters) and **Self-Relative 30-Day Baselines** (which track slow string soiling).*
 > 4. *Designed the collinearity pruning pipeline ($r > 0.85$) while strictly protecting critical physical indicators.*
-> 5. *Built, hyperparameter-tuned, and evaluated the **XGBoost** suite (Track T3), forecasting health one hour ahead. It reaches validation RMSE 10.90 (persistence 12.92) and validation Faulty recall 0.73; I also found and fixed a target leakage in my first version.*
+> 5. *Built, hyperparameter-tuned, and evaluated the **XGBoost** suite (Track T3), forecasting health one hour ahead. It reaches validation RMSE 11.38 (persistence 13.04), test RMSE 10.58 (persistence 12.30) and test Faulty recall 0.64; I also found and fixed a target leakage in my first version.*
 > 6. *Explained the model's inner workings using **Tree-SHAP** global beeswarm and local waterfall attributions, diagnosing top prediction failure residuals.*
 > 7. *Co-validated the **Isolation Forest** pipeline on the real-world **GPVS-Faults** hardware benchmark (achieving $77.3\%$ Precision and $68.0\%$ Recall)."*
 
@@ -61,11 +61,11 @@
   * Standard feature importance (such as Gini impurity decrease or split frequency) suffers from severe bias towards high-cardinality features and fails to indicate whether a feature increases or decreases failure probability.
   * We utilized **Tree-SHAP** (Lundberg et al.), which computes exact Shapley values derived from cooperative game theory in polynomial time $\mathcal{O}(T \cdot L \cdot D^2)$ instead of exponential time $\mathcal{O}(T \cdot L \cdot 2^M)$ by recursively keeping track of the proportion of training instances that flow down each branch.
   * **Global Insights (mean |SHAP| on 1,500 test rows, health points):**
-    1. `health_now` (current health) is by far the #1 input (10.86): for a one-hour forecast the present state is the best single guess.
-    2. `peer_dev_campus` (2.22) and `self_dev_30d` (2.20) come next: how the inverter compares with the campus now and with its own last 30 days.
-    3. Seasonal and hour terms (`day_cos` 1.09, `hour_sin` 1.00) follow; `orient_south` and `orient_east_west` contribute nothing because they are constant in the metadata.
+    1. `peer_dev_campus` (3.15) and `health_now` (2.56) are the top two inputs: how the inverter compares with the campus right now, and its current health.
+    2. `self_dev_30d` (0.75) and the seasonal and hour terms (`day_cos` 0.75, `hour_sin` 0.73) follow.
+    3. `orient_south` and `orient_east_west` contribute nothing because they are constant in the metadata.
   * **Local Insights (Waterfall Plot on the worst error):**
-    * `zone_a2_inverter_3`, 2023-06-14 09:45: base value 91.64, prediction 89.08, actual Health(t + 1 h) 0.0. Health at t was 85 and the inverter was slightly above its peers, so nothing in the inputs signalled the sudden drop; an unpredictable onset rather than a model bug.
+    * `zone_a6_inverter`, 2023-08-30 14:00: base value 94.73, prediction 97.93, actual Health(t + 1 h) 33.8. Health at t was 100 and the inverter was in line with its peers, so nothing in the inputs signalled the sudden drop; an unpredictable onset rather than a model bug.
 
 ---
 
@@ -77,13 +77,13 @@
 
     | | Val RMSE | Test RMSE (2023) | Unseen RMSE |
     | :--- | :---: | :---: | :---: |
-    | XGBoost (B1) | 10.90 | 20.07 | 17.60 |
-    | MLP (B2) | 20.76 | 28.12 | 25.26 |
-    | Persistence | 12.92 | 16.56 | 17.14 |
+    | XGBoost (B1) | 11.38 | 10.58 | 9.90 |
+    | MLP (B2) | 13.71 | 11.99 | 14.02 |
+    | Persistence | 13.04 | 12.30 | 10.73 |
 
-  * XGBoost is clearly ahead of the MLP on every split. On unseen inverters it is close to persistence, so it transfers to new rooftops about as well as the trivial forecast, not better.
-  * **Honest caveat:** on the 2023 test year neither model beats persistence. After the 2023-02-14 irradiance sensor change the health labels shift, and models trained on 2021-22 relationships degrade. Before that date XGBoost's test RMSE is 10.01 against persistence 10.88.
-  * Recommendation: XGBoost is the stronger supervised model, but deployment needs the health score's irradiance dependence fixed first.
+  * XGBoost is ahead of the MLP on every split and beats persistence everywhere; the MLP is worse than persistence on validation and on unseen inverters. The MLP trains on a 60k-row sample without history or peer features, which explains part of the gap.
+  * **History of the result:** before the health score was corrected for the 2023-02-14 irradiance sensor change, no model beat persistence on 2023 (XGBoost test RMSE 20.07). The correction removed that label shift.
+  * Recommendation: XGBoost is the stronger of the two; across all tracks A2's Random Forest is the selected regressor (test RMSE 9.73).
 
 ---
 
@@ -117,8 +117,8 @@
   * **Method 2 (Regression Thresholding)** minimizes Mean Squared Error: $\frac{1}{n} \sum (y_i - \hat{y}_i)^2$. Because healthy operating conditions account for $> 95\%$ of all timestamps, the loss gradient is dominated by healthy points. A regression error of $\pm 2.0$ health score is negligible for overall RMSE, but if an inverter's true health is $69.0$ (`Faulty`) and the regressor predicts $71.0$, the post-hoc threshold assigns it to `Warning`, completely missing the critical fault.
   * **Method 1 (Dedicated Multi-Class Classifier)** directly optimizes multi-class cross-entropy loss (`multi:softprob`). Crucially, we incorporated inverse class-frequency sample weights:
     $$w_i = \frac{N}{C \cdot N_{c(i)}}$$
-  * In training, Faulty is about 10% of rows, so its balanced weight is about 3.4 and is then multiplied by 1.35 (about 4.6, against about 0.4 for Healthy). On validation, Method 1 reaches **Faulty recall 0.73** against Method 2's **0.62**; Method 2 is more precise (0.93 vs 0.79) and slightly higher on macro-F1 (0.69 vs 0.67), but Faulty recall is the primary metric.
-  * **Stage 5 balancing:** sample weights were compared with Healthy undersampling (2 Healthy : 1 other); sample weights won on Faulty recall (0.730 vs 0.696). SMOTE was rejected because it invents rows between different days and inverters.
+  * In training, Faulty is about 7% of rows, so its balanced weight is about 4.5 and is then multiplied by 1.35 (about 6.1, against about 0.4 for Healthy). On validation, Method 1 reaches **Faulty recall 0.65** against Method 2's **0.48**; Method 2 is more precise (0.89 vs 0.50) and higher on macro-F1 (0.64 vs 0.60), but Faulty recall is the primary metric.
+  * **Stage 5 balancing:** sample weights were compared with Healthy undersampling (2 Healthy : 1 other); sample weights won on Faulty recall (0.654 vs 0.516). SMOTE was rejected because it invents rows between different days and inverters.
 
 ---
 
@@ -137,15 +137,14 @@
 
 ---
 
-### Question 9: "How did you measure 3-year degradation in Stage 6 EDA, and why did you use Theil-Sen regression instead of OLS?"
+### Question 9: "How did you measure 3-year degradation in Stage 6 EDA, and how reliable is the estimate?"
 
 * **Answer:**
-  * In Stage 6 EDA ([`src/eda_b1.py`](file:///Users/hettala/Downloads/ML%20ass/src/eda_b1.py)), we evaluated whether inverter performance degraded over the 3-year historical monitoring window ($2021\text{--}2023$).
-  * To eliminate seasonal solar azimuth changes, we computed the daily midday Performance Ratio ($PR$) under clear-sky conditions ($G > 600\text{ W/m}^2$).
-  * Ordinary Least Squares (OLS) minimizes squared residuals and is notorious for being distorted by temporary equipment outages, grid curtailment events, or passing storm fronts (extreme low-yield outliers).
-  * We utilized **Theil-Sen Robust Estimator**, which computes the median of slopes between all pairwise observation coordinates:
-    $$\text{Slope} = \text{median}\left\{ \frac{y_j - y_i}{x_j - x_i} \;\middle|\; x_j > x_i \right\}$$
-  * Theil-Sen has a breakdown point of $29.3\%$, meaning nearly a third of the data can be contaminated by severe operational anomalies without corrupting the degradation estimate. The analysis revealed an average annual degradation slope of $-0.62\% / \text{year}$, which precisely aligns with expected NREL warranties ($0.5\text{--}0.7\% / \text{year}$ for crystalline silicon).
+  * In Stage 6 EDA ([`src/eda_b1.py`](../src/eda_b1.py)), we evaluated whether inverter performance degraded over the 3-year historical monitoring window ($2021\text{--}2023$).
+  * To hold the solar resource roughly constant, we kept clear-sky midday bins only (11:00-14:00, $G \ge 600\text{ W/m}^2$) and used specific yield (kW AC per kWp).
+  * Outliers are handled by taking the **median** specific yield per year (robust to outages and curtailment), then fitting an ordinary least-squares line through the three annual medians (`np.polyfit` in `src/eda_b1.py`).
+  * Result: medians 0.677 (2021), 0.665 (2022), 0.657 (2023) kW/kWp, a compound rate of **$-1.52\%/\text{year}$** for the campus; the median per-inverter rate is **$-1.04\%/\text{year}$** (38 inverters).
+  * **Reliability:** this is above the typical $0.5\text{--}0.8\%/\text{year}$ for crystalline silicon. Three annual points, a partial first year (from May 2021) and one irradiance correction factor for 2023 make it an indication of drift, not a precise estimate. A robust slope estimator such as Theil-Sen on monthly medians would be a better next step.
 
 ---
 
@@ -153,7 +152,7 @@
 
 * **Answer:**
   * Tabular electrical telemetry contains redundant collinear variables (e.g. 3-phase currents $I_A, I_B, I_C$ and active power; module temperature and ambient temperature). Highly collinear features cause tree-building algorithms to split arbitrarily among correlated surrogates, inflating variance and distorting SHAP attributions.
-  * In [`src/features.py`](file:///Users/hettala/Downloads/ML%20ass/src/features.py), we implemented an automated correlation pruning pipeline:
+  * In [`src/features.py`](../src/features.py), we implemented an automated correlation pruning pipeline:
     1. Compute the Pearson correlation matrix exclusively on the training split to avoid data leakage.
     2. Identify all feature pairs with $|r| > 0.85$.
     3. For each collinear pair, evaluate their mutual information or correlation with the health target, discarding the weaker predictor.
@@ -167,10 +166,10 @@
 * **Answer:**
   * While Pair A evaluated unsupervised models on synthetically injected faults, Pair B (B1 and B2) focused on real-world physical laboratory faults using the **GPVS-Faults benchmark dataset**.
   * Synthetic faults often carry idealized mathematical artifacts (e.g. Gaussian additive noise or uniform scaling) that tree models trivial to detect. In contrast, GPVS-Faults contains actual physical hardware anomalies: line-to-line short circuits, high-impedance series faults, and open-circuit string disconnections.
-  * In [`src/models/iforest.py`](file:///Users/hettala/Downloads/ML%20ass/src/models/iforest.py), we implemented an **Isolation Forest** pipeline with `StandardScaler`:
+  * In [`src/models/iforest.py`](../src/models/iforest.py), we implemented an **Isolation Forest** pipeline with `StandardScaler`:
     * Trained purely unsupervised on healthy operational telemetry (contamination estimated at $9.1\%$).
     * Evaluated on held-out physical faults, achieving **$77.27\%$ Precision**, **$68.00\%$ Fault Recall**, and an **F1-score of $0.7234$** with only a **$2.00\%$ False Alarm Rate**.
-  * I created the visual diagnostic tool ([`reports/figures/b1_iforest_gpvs_detection.png`](file:///Users/hettala/Downloads/ML%20ass/reports/figures/b1_iforest_gpvs_detection.png)) displaying the anomaly score KDE distributions and confusion matrix.
+  * I created the visual diagnostic tool ([`reports/figures/b1_iforest_gpvs_detection.png`](figures/b1_iforest_gpvs_detection.png)) displaying the anomaly score KDE distributions and confusion matrix.
 
 ---
 

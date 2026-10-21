@@ -74,11 +74,10 @@ design already used by A1: features at time `t` predict `health_score_lead4` and
 `status_lead4` exactly one hour later. Current power may therefore be an input.
 Neither current nor future target columns are included in the feature allowlist.
 
-B1's function currently replaces missing power with zero, and its status
-function defaults missing scores to Healthy. A2 only accepts observed, valid
-target measurements and explicitly keeps missing scores/statuses undefined.
-This guard is local to A2; existing B1/A1/B2 model runs are not automatically fixed.
-Their earlier results must not be treated as directly comparable to this run.
+B1's function replaced missing power with zero when this was written; since
+2026-10-21 it returns an undefined score instead, matching A2's rule. A2 still
+accepts only observed, valid target measurements and keeps missing
+scores/statuses undefined. All models were re-run on the corrected target.
 
 ## B2 splits
 
@@ -161,8 +160,8 @@ deliverable. No test scores were used to choose the imputer.
 
 | Imputation | Validation RMSE | Validation MAE | Macro-F1 | Faulty recall |
 |---|---:|---:|---:|---:|
-| Median | 10.114 | 5.619 | 0.6374 | 0.6692 |
-| Mean | 10.121 | 5.621 | 0.6410 | 0.6698 |
+| Median | 10.111 | 5.617 | 0.6382 | 0.6596 |
+| Mean | 10.120 | 5.620 | 0.6406 | 0.6678 |
 
 Mean was selected by validation macro-F1, with RMSE as a tie-breaker.
 The differences are small and come from one fixed sample; they are not evidence
@@ -215,5 +214,6 @@ NumPy 2.5.4, PyArrow 26.0.0, scikit-learn 1.9.1, PyYAML 6.0.3 and matplotlib
 Class-balancing study, temperature/correlation EDA, lag/rolling features, full
 Random Forest training/tuning/explainability, paired Isolation Forest evaluation,
 and the project-wide leakage audit remain separate tasks. A1's documented
-February 2023 irradiance sensor change also remains unresolved and affects B1
-labels; the 2023 test distribution must be interpreted with that limitation.
+February 2023 irradiance sensor change is corrected in `prepare_data.py` since
+2026-10-21 (factor 0.570); the factor uses test-year data, which is a stated
+limitation.
