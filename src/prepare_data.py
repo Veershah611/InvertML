@@ -157,8 +157,15 @@ def build_inverter_metadata(graph):
                                 "station": "station_id",
                                 "deg_first_year": "degradation_first_year_pct",
                                 "deg_linear": "degradation_linear_pct"})
-    meta["tilt_deg"] = pd.to_numeric(
-        meta.pop("tilt").str.replace("deg", "", regex=False), errors="coerce")
+    # Mixed-array stations list two tilts (e.g. "0/15deg"); use their midpoint and flag them.
+    # Stations recorded only as "Mixed" get 5deg, the midpoint of the campus 0-10deg range.
+    tilt = meta.pop("tilt").str.replace("deg", "", regex=False)
+    tilt_parts = tilt.str.split("/")
+    meta["tilt_mixed"] = ((tilt_parts.str.len() > 1) | (tilt == "Mixed")).astype(int)
+    meta["tilt_deg"] = tilt_parts.apply(
+        lambda p: pd.to_numeric(pd.Series(p), errors="coerce").mean()
+        if isinstance(p, list) else float("nan"))
+    meta.loc[tilt == "Mixed", "tilt_deg"] = 5.0
     # Dates appear as both "2021-01-30T00:00:00" and "2021-08-31 00:00:00".
     meta["connection_date"] = pd.to_datetime(meta["connection_date"], format="ISO8601")
     meta["capacity_kwp"] = meta["capacity_kwp"].round(3)
