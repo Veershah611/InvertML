@@ -5,6 +5,8 @@
 **Core Modules Owned:** [`src/features.py`](file:///Users/hettala/Downloads/ML%20ass/src/features.py), [`src/targets.py`](file:///Users/hettala/Downloads/ML%20ass/src/targets.py), [`src/models/xgb.py`](file:///Users/hettala/Downloads/ML%20ass/src/models/xgb.py), [`notebooks/01_eda_B1.ipynb`](file:///Users/hettala/Downloads/ML%20ass/notebooks/01_eda_B1.ipynb), [`notebooks/03_xgb_B1.ipynb`](file:///Users/hettala/Downloads/ML%20ass/notebooks/03_xgb_B1.ipynb)  
 **Co-owned Module:** [`src/models/iforest.py`](file:///Users/hettala/Downloads/ML%20ass/src/models/iforest.py) (Pair B Real-Fault GPVS Benchmark)
 
+> **Correction (2026-10-21).** Earlier versions of this guide quoted XGBoost test RMSE 0.30 and 100% Faulty recall. Those came from target leakage (the model predicted Health(t) from PR-based features at the same t). XGBoost now forecasts Health(t + 1 h) (Option A). The numbers below are from the fixed run; see `reports/Section_09_10_XGBoost.md`.
+
 ---
 
 ## 1. Quick-Fire Summary for the Examiners
@@ -16,7 +18,7 @@
 > 2. *Conducted Stage 6 EDA to quantify long-term 3-year panel degradation rates and identify persistently underperforming campus rooftop stations.*
 > 3. *Engineered domain-specific physical features—most notably **Peer-Deviation** (which cancels dynamic passing cloud weather noise by comparing co-located inverters) and **Self-Relative 30-Day Baselines** (which track slow string soiling).*
 > 4. *Designed the collinearity pruning pipeline ($r > 0.85$) while strictly protecting critical physical indicators.*
-> 5. *Built, hyperparameter-tuned, and evaluated the **XGBoost** suite (Track T3), demonstrating that dedicated weighted classification achieves $100\%$ Fault Detection Recall.*
+> 5. *Built, hyperparameter-tuned, and evaluated the **XGBoost** suite (Track T3), forecasting health one hour ahead. It reaches validation RMSE 10.90 (persistence 12.92) and validation Faulty recall 0.73; I also found and fixed a target leakage in my first version.*
 > 6. *Explained the model's inner workings using **Tree-SHAP** global beeswarm and local waterfall attributions, diagnosing top prediction failure residuals.*
 > 7. *Co-validated the **Isolation Forest** pipeline on the real-world **GPVS-Faults** hardware benchmark (achieving $77.3\%$ Precision and $68.0\%$ Recall)."*
 
@@ -44,10 +46,12 @@
 * **The Core Answer:**
   * In solar photovoltaic monitoring, the central challenge is distinguishing **ambient weather fluctuations** from **actual hardware degradation**.
   * When a dark cumulus cloud passes over the campus, irradiance plunges from $900\text{ W/m}^2$ to $150\text{ W/m}^2$, causing raw AC power generation across all inverters to drop by $80\%$. An isolated model reading only single-inverter power would see a massive power collapse and trigger false alarm fault warnings.
-  * To solve this, I designed the **Peer-Deviation feature**:
-    $$\text{peer\_deviation\_ratio}_i(t) = \frac{\text{ac\_power}_i(t)}{\text{median}_{j \in \text{Station}}(\text{ac\_power}_j(t)) + \epsilon}$$
-  * Because all inverters installed on the same building rooftop share identical instantaneous atmospheric conditions, taking the ratio against the co-located peer median **cancels out global weather noise**.
-  * If the peer ratio is $\approx 1.0$, the entire station is experiencing passing cloud cover (healthy behavior). If the peer ratio drops to $0.45$ while peers generate normally, we have unambiguously isolated a localized physical hardware failure (e.g. blown string fuse, inverter diode failure, or localized tree shading).
+  * To solve this, I designed the **Peer-Deviation features** (`src/features.py`), computed on the Performance Ratio (PR):
+    $$\text{peer\_dev\_campus}_i(t) = \frac{PR_i(t) - \text{median}_{j}\,PR_j(t)}{\text{median}_{j}\,PR_j(t) + 0.05}$$
+    with the median over all campus inverters at the same timestamp (`peer_dev_station` uses the inverters of the same station), clipped to $[-3, 3]$.
+  * Because all inverters share the same sky (one weather station serves the campus), comparing against the peer median **cancels out the shared weather**.
+  * If the deviation is near 0, the inverter behaves like its peers (for example a passing cloud affecting everyone). A strongly negative value while peers produce normally points to a local problem at that inverter (a hypothesis to check; the dataset has no maintenance logs).
+  * It also cancels the 2023-02-14 irradiance sensor change, which affects all inverters at once.
 
 ---
 
@@ -56,12 +60,12 @@
 * **The Core Answer:**
   * Standard feature importance (such as Gini impurity decrease or split frequency) suffers from severe bias towards high-cardinality features and fails to indicate whether a feature increases or decreases failure probability.
   * We utilized **Tree-SHAP** (Lundberg et al.), which computes exact Shapley values derived from cooperative game theory in polynomial time $\mathcal{O}(T \cdot L \cdot D^2)$ instead of exponential time $\mathcal{O}(T \cdot L \cdot 2^M)$ by recursively keeping track of the proportion of training instances that flow down each branch.
-  * **Global Insights (Beeswarm Plot):**
-    1. `peer_deviation_ratio` was overwhelmingly the #1 predictor across the entire dataset. Low peer ratios ($< 0.85$) exerted the strongest negative pull on health score predictions (up to $-15\%$ impact).
-    2. Solar irradiance (`irradiance_wm2`) and `generation_to_temp_interaction` ranked #2 and #3. Under high irradiance, operating temperature becomes the critical limiting factor due to silicon thermal derating.
-    3. The 30-day self-relative ratio (`self_relative_ratio_30d`) provided long-term drift detection, capturing gradual string soiling.
-  * **Local Insights (Waterfall Plot on Failure Case):**
-    * Decomposing the worst-case prediction error ($\Delta = 2.38$ points) revealed that the nominal base expectation was $98.42\%$. High solar irradiance boosted the prediction by $+1.12\%$, but a localized peer discrepancy dropped it by $-2.38\%$ due to a low-angle morning shadow cast by an architectural library parapet.
+  * **Global Insights (mean |SHAP| on 1,500 test rows, health points):**
+    1. `health_now` (current health) is by far the #1 input (10.86): for a one-hour forecast the present state is the best single guess.
+    2. `peer_dev_campus` (2.22) and `self_dev_30d` (2.20) come next: how the inverter compares with the campus now and with its own last 30 days.
+    3. Seasonal and hour terms (`day_cos` 1.09, `hour_sin` 1.00) follow; `orient_south` and `orient_east_west` contribute nothing because they are constant in the metadata.
+  * **Local Insights (Waterfall Plot on the worst error):**
+    * `zone_a2_inverter_3`, 2023-06-14 09:45: base value 91.64, prediction 89.08, actual Health(t + 1 h) 0.0. Health at t was 85 and the inverter was slightly above its peers, so nothing in the inputs signalled the sudden drop; an unpredictable onset rather than a model bug.
 
 ---
 
@@ -69,11 +73,17 @@
 
 * **The Core Answer:**
   * This comparison highlights the fundamental trade-off between **inductive bias** in decision trees versus neural networks:
-  * On the **Chronological In-Station Test Set (2023)**, XGBoost outperformed the MLP by a wide margin: **XGBoost achieved $0.30$ RMSE** versus **MLP's $4.76$ RMSE**, and **$100\%$ Fault Recall** versus **MLP's $95\%$**. XGBoost's sharp axis-aligned partitions captured the exact operational thresholds of the known inverters.
-  * On **Completely Unseen Rooftops (7 held-out stations)**:
-    * While XGBoost still achieved an exceptional **$0.22$ RMSE** (thanks to feature normalization via peer-ratios and our conservative `max_depth = 6` regularization), B2's MLP demonstrated remarkable smoothness (**$5.04$ RMSE**).
-    * MLPs learn smooth, continuous weight embeddings across the input space. When encountering a new rooftop with slightly different tilt, orientation, or wiring geometry, the MLP's continuous function surface avoids severe partition errors. In contrast, an unregularized deep tree risks overfitting to the specific cutoff thresholds of training rooftops.
-    * Therefore, we recommend **XGBoost as the primary real-time inference engine** for operational sites, while the **MLP serves as an ensemble validation partner** for newly commissioned solar stations.
+  * Latest logged results (both forecasting Health(t + 1 h)):
+
+    | | Val RMSE | Test RMSE (2023) | Unseen RMSE |
+    | :--- | :---: | :---: | :---: |
+    | XGBoost (B1) | 10.90 | 20.07 | 17.60 |
+    | MLP (B2) | 20.76 | 28.12 | 25.26 |
+    | Persistence | 12.92 | 16.56 | 17.14 |
+
+  * XGBoost is clearly ahead of the MLP on every split. On unseen inverters it is close to persistence, so it transfers to new rooftops about as well as the trivial forecast, not better.
+  * **Honest caveat:** on the 2023 test year neither model beats persistence. After the 2023-02-14 irradiance sensor change the health labels shift, and models trained on 2021-22 relationships degrade. Before that date XGBoost's test RMSE is 10.01 against persistence 10.88.
+  * Recommendation: XGBoost is the stronger supervised model, but deployment needs the health score's irradiance dependence fixed first.
 
 ---
 
@@ -93,11 +103,11 @@
 ### Question 6: "Explain the difference between Feature Leakage Prevention Option A and Option B in Stage 7."
 
 * **Answer:**
-  * The continuous Health Score is computed directly from instantaneous AC power and irradiance. If we use current-timestep features to predict current-timestep health, any model containing `ac_power_w` would achieve a trivial $R^2 = 1.0$ by simply reconstructing the target equation.
+  * The continuous Health Score is computed directly from instantaneous AC power and irradiance. If we use current-timestep features to predict current-timestep health, the model reconstructs the target equation. This happened in my first XGBoost version: PR-based features at t gave test RMSE 0.30 and F1 1.00, which was leakage, not skill.
   * We engineered two distinct architectural options to prevent this:
     * **Option A (Forward Forecasting Lead):** The model predicts health at $t + 1\text{ hour}$ into the future ($\hat{y}_{t+4}$). Current-timestep electrical measurements ($t$) are legitimate inputs because they precede the target event. This tests proactive predictive maintenance.
-    * **Option B (Diagnostic Feature Purging):** The model evaluates instantaneous health ($t$), but raw AC power, current, and voltage are purged from the feature set. The model is restricted to exogenous inputs (irradiance, ambient temperature, module temperature, peer deviations, and cyclical time encodings).
-  * Our final production pipeline operates under Option A to provide plant operators with actionable early warning lead-time before inverter failure.
+    * **Option B (Diagnostic Feature Purging):** The model evaluates instantaneous health ($t$), but every input derived from AC power at $t$ (including PR-based peer and self deviations) is removed or lagged. The model is restricted to exogenous inputs (irradiance, ambient temperature, cyclical time encodings) and past values; the dataset has no module temperature.
+  * The fixed XGBoost uses Option A (target exactly one hour later, same day), the same design as A1 and A2, which gives operators lead time.
 
 ---
 
@@ -107,7 +117,8 @@
   * **Method 2 (Regression Thresholding)** minimizes Mean Squared Error: $\frac{1}{n} \sum (y_i - \hat{y}_i)^2$. Because healthy operating conditions account for $> 95\%$ of all timestamps, the loss gradient is dominated by healthy points. A regression error of $\pm 2.0$ health score is negligible for overall RMSE, but if an inverter's true health is $69.0$ (`Faulty`) and the regressor predicts $71.0$, the post-hoc threshold assigns it to `Warning`, completely missing the critical fault.
   * **Method 1 (Dedicated Multi-Class Classifier)** directly optimizes multi-class cross-entropy loss (`multi:softprob`). Crucially, we incorporated inverse class-frequency sample weights:
     $$w_i = \frac{N}{C \cdot N_{c(i)}}$$
-  * This placed an approximately $20\times$ higher loss penalty on misclassifying the minority `Faulty` class. The tree-building algorithm prioritized splits that cleanly isolated fault clusters, achieving a **$100\%$ Fault Detection Recall** ($0$ missed faults) compared to Method 2's $88.5\%$.
+  * In training, Faulty is about 10% of rows, so its balanced weight is about 3.4 and is then multiplied by 1.35 (about 4.6, against about 0.4 for Healthy). On validation, Method 1 reaches **Faulty recall 0.73** against Method 2's **0.62**; Method 2 is more precise (0.93 vs 0.79) and slightly higher on macro-F1 (0.69 vs 0.67), but Faulty recall is the primary metric.
+  * **Stage 5 balancing:** sample weights were compared with Healthy undersampling (2 Healthy : 1 other); sample weights won on Faulty recall (0.730 vs 0.696). SMOTE was rejected because it invents rows between different days and inverters.
 
 ---
 
@@ -146,7 +157,7 @@
     1. Compute the Pearson correlation matrix exclusively on the training split to avoid data leakage.
     2. Identify all feature pairs with $|r| > 0.85$.
     3. For each collinear pair, evaluate their mutual information or correlation with the health target, discarding the weaker predictor.
-    4. **Protected Features Safeguard:** Core domain variables—such as `peer_deviation_ratio`, `irradiance_wm2`, and `self_relative_ratio_30d`—were explicitly protected from pruning regardless of threshold to preserve physical interpretability.
+    4. **Protected Features Safeguard:** Core domain variables such as `peer_dev_campus` and `self_dev_30d` were explicitly protected from pruning regardless of threshold to preserve physical interpretability.
   * This distilled the feature space to 13 non-redundant, physically robust predictors.
 
 ---
@@ -166,5 +177,5 @@
 ### Question 12: "If deploying this system on an edge microcontroller or cloud SCADA, what are the computational bottlenecks?"
 
 * **Answer:**
-  * **Inference Speed:** XGBoost evaluates decisions via pointer jumps through binary conditional nodes. For an ensemble of 300 trees with `max_depth = 6`, inference takes **$< 0.4\text{ ms}$ per sample** in Python, and can be compiled into pure C/C++ via `Treelite` to execute in $< 50\text{ microseconds}$ with $< 2\text{ MB}$ memory footprint. This makes it ideal for local microcontrollers (such as STM32 or Raspberry Pi edge gateways) co-located inside the inverter enclosure.
-  * **Feature Latency Bottleneck:** The only latency constraint is the calculation of the `peer_deviation_ratio`, which requires receiving synchronous power readings from neighboring rooftop inverters over Modbus RS-485 or wireless LoRaWAN. If network transmission drops, the pipeline automatically falls back to the `self_relative_ratio_30d`, which relies solely on the inverter's local flash memory.
+  * **Inference Speed:** XGBoost evaluates decisions via pointer jumps through binary conditional nodes; the final model (250 trees, `max_depth = 4`) is small and fast enough for a server scoring every 15 minutes. Training takes about 4 s (regressor) and 11 s (classifier) on a laptop CPU. Per-sample latency was not benchmarked in this project.
+  * **Feature Latency Bottleneck:** `peer_dev_campus` needs synchronous readings from the other inverters at the same timestamp. If peers are missing, the current code fills the value with the training median; a real deployment would need an explicit fallback (for example `self_dev_30d`, which uses only the inverter's own history). This fallback is not implemented.

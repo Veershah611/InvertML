@@ -1,4 +1,4 @@
-rank,timestamp,inverter_id,actual_health,predicted_health,residual_error,irradiance_wm2,temp_c,physical_root_cause
-1,2023-12-17 13:30:00,library_inverter_1,96.1,98.65,2.54,864.2,28.8,Localized rooftop partial shading from adjacent campus architectural obstruction
-2,2023-01-01 10:45:00,zone_a1_inverter_2,95.96,98.24,2.28,754.1,28.5,Localized rooftop partial shading from adjacent campus architectural obstruction
-3,2023-01-01 16:00:00,sq_block_p_inverter,98.32,96.5,1.82,381.2,25.4,Localized rooftop partial shading from adjacent campus architectural obstruction
+rank,timestamp,inverter_id,health_now,actual_health_t_plus_1h,predicted_health,residual_error,irradiance_wm2,temp_c,n_valid_5min,power_missing
+1,2023-06-14 09:45:00,zone_a2_inverter_3,85.0,0.0,89.08,89.08,248.6,25.6,3,False
+2,2023-09-07 11:45:00,library_inverter_1,18.12,16.6,85.86,69.27,384.2,27.6,3,False
+3,2023-08-13 10:15:00,ug_hall2_2f_inverter,100.0,25.71,93.53,67.82,546.0,29.6,3,False
