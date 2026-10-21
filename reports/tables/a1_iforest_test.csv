@@ -1,0 +1,5 @@
+inputs,version,contamination,n_estimators,detection_rate,false_alarm_rate,tp,fp,precision,f1,false_alarm_before_14feb,false_alarm_after_14feb
+A2 inputs,tuned,0.01,200,0.1759,0.0666,19,822,0.0226,0.04,0.0618,0.0722
+A2 inputs,A2 settings,0.05,200,0.3333,0.1941,36,2396,0.0148,0.0283,0.2306,0.1508
+A2 inputs + peer deviation,tuned,0.01,400,0.3056,0.2488,33,3071,0.0106,0.0205,0.1183,0.4035
+A2 inputs + peer deviation,A2 settings,0.05,200,0.5648,0.3916,61,4834,0.0125,0.0244,0.1823,0.6397
