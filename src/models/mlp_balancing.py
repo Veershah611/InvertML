@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from sklearn.metrics import (
-    f1_score,
+    f1_score,test
     recall_score,
     precision_score,
     confusion_matrix,
