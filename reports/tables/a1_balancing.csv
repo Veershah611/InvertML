@@ -1,3 +1,0 @@
-strategy,best_C,train_rows,val_rows,macro_f1,faulty_recall,faulty_precision,faulty_pr_auc,confusion_matrix,selected
-class_weight,10.0,261536,183667,0.5439,0.7213,0.4344,0.6668,"[[116595, 19562, 9583], [7314, 5516, 7215], [2974, 2009, 12899]]",True
-undersampling,0.001,116943,183667,0.5609,0.6383,0.6012,0.6803,"[[139078, 2856, 3806], [14339, 1942, 3764], [5481, 987, 11414]]",False

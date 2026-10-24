@@ -1,0 +1,6 @@
+inverter_id,time,health_now,health_lead,predicted,error,irradiance_wm2,minutes_offline_24h
+zone_d_inverter_2,2023-02-20 11:15:00,100.0,0.0,104.73,104.73,552.21,165.0
+zone_a2_inverter_3,2023-12-22 09:15:00,100.0,0.0,102.59,102.59,179.48,15.0
+library_inverter_2,2023-12-30 09:45:00,100.0,0.0,102.17,102.17,328.02,0.0
+zone_a2_inverter_3,2023-12-22 09:30:00,100.0,0.0,102.05,102.05,183.49,15.0
+library_inverter_2,2023-12-30 09:30:00,100.0,0.57,102.15,101.58,285.75,0.0

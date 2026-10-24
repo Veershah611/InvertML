@@ -1,0 +1,5 @@
+set,rows,macro_f1,faulty_recall,faulty_precision,version,tuned_settings
+val,182731,0.633,0.563,0.67,default,"{'model__learning_rate': 0.1, 'model__max_depth': 4}"
+test,366110,0.563,0.453,0.564,default,"{'model__learning_rate': 0.1, 'model__max_depth': 4}"
+val,182731,0.623,0.63,0.607,tuned,"{'model__learning_rate': 0.1, 'model__max_depth': 4}"
+test,366110,0.58,0.578,0.549,tuned,"{'model__learning_rate': 0.1, 'model__max_depth': 4}"

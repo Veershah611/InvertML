@@ -1,3 +1,0 @@
-strategy,train_rows,val_rows,macro_f1,faulty_recall,faulty_precision,faulty_pr_auc,confusion_matrix,selected
-sample_weights,261536,183667,0.5999,0.6542,0.5025,0.6742,"[[117811, 20689, 7240], [5791, 9914, 4340], [2386, 3798, 11698]]",True
-undersampling,116943,183667,0.6429,0.5164,0.7603,0.694,"[[140541, 4155, 1044], [11681, 6496, 1868], [5913, 2734, 9235]]",False

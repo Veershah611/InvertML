@@ -2,6 +2,8 @@
 
 An end-to-end machine learning project that predicts inverter health, classifies operational status, and flags anomalous behaviour, using **up to three years of inverter-level telemetry from 44 inverters at 37 rooftop PV stations** (out of the dataset's 60) plus on-site weather data. A team of four builds it. The work follows the 12-stage pipeline in the Innovative Assignment guidelines, and every major decision is justified and validated.
 
+> This document is the project **plan**. What was actually built, with every result, is in [REPORT.md](REPORT.md); where the final implementation differs from this plan, REPORT.md lists the difference and the reason.
+
 ---
 
 ## 0. Pipeline Coverage Checklist (maps to IA Guidelines §2)
@@ -318,7 +320,7 @@ Leading a stage means designing it, writing the shared code, and defending the d
 | **EDA questions (§6)** | Power vs. irradiance; gaps/offline heatmap | Temperature effect; feature correlation | Degradation over 3 years; consistently underperforming stations | Seasonality; class distribution |
 | **Feature group (§7)** | Outage features (`is_offline`, minutes offline) | Lag & rolling statistics | PR, peer deviation, self-relative deviation | Time (sin/cos) + station metadata |
 | **Model family (both tasks)** | **Linear:** persistence + Ridge; majority + rule-based + Logistic (these are the team baselines) | **Bagging:** Random Forest | **Boosting:** XGBoost | **Neural network:** MLP |
-| **Tuning method** | GridSearch (small grid) | RandomizedSearch on sample | Optuna / RandomizedSearch + early stopping | RandomizedSearch on sample |
+| **Tuning method** | GridSearch + TimeSeriesSplit (shared `run_model`) | Same, on a 50k-row sample | Same | Same, on a 50k-row sample |
 | **Explainability** | Coefficients + permutation importance | Permutation importance + SHAP | SHAP (global + local) | Permutation importance + partial dependence |
 | **Anomaly (with partner)** | Isolation Forest on HKUST with injected faults | Same, together with A1 | Isolation Forest on GPVS-Faults (real faults) | Same, together with B1 |
 | **Shared write-up** | Reproducibility section | Data-leakage audit | Feature/target justification | AI-usage & resources log |
@@ -351,7 +353,7 @@ Every student is hands-on (H or L) in **at least 12 of the 15 concepts** and rev
 ### 13.4 Working rules
 * **Within a pair:** partners review each other's code before merging, and each explains the other's model at the weekly sync. In the viva, every student should be able to explain their partner's model as well as their own.
 * **Across pairs:** Pair A reviews Pair B's target design and evaluation code; Pair B reviews Pair A's data and preprocessing pipeline. This catches leakage the authors themselves miss.
-* **Shared contracts:** one `prepare_data.py` → Parquet output, one `features.py`, one `evaluate.py`. Nobody computes metrics their own way.
+* **Shared contracts:** one `prepare_data.py` → Parquet output, one `dataset.py` (target, features, splits) that every model reads, one `evaluate.py` with a single training-and-scoring recipe. Nobody computes metrics their own way.
 * **Every model deliverable includes:** a default-vs-tuned table, train-vs-test scores, a baseline comparison, results on the unseen-station test, and 2–3 failure cases.
 
 ### 13.5 Timeline (4 weeks)
@@ -368,29 +370,30 @@ Every student is hands-on (H or L) in **at least 12 of the 15 concepts** and rev
 **One GitHub repo, with code in `.py` files and notebooks as thin drivers.** Notebooks cause merge conflicts, so shared logic lives in `src/` and each notebook only imports and calls it.
 
 ```
-solar-health/
-├── data/                # NOT in git (.gitignore); raw zip + processed Parquet
+InvertML/
+├── data/                # NOT in git (.gitignore); raw data + processed Parquet
 ├── src/
-│   ├── prepare_data.py  # A1
-│   ├── preprocess.py    # A2
-│   ├── features.py      # B1 framework; each student adds their feature group
-│   ├── evaluate.py      # B2
+│   ├── prepare_data.py  # Stage 3 (A1)
+│   ├── dataset.py       # Stages 4 + 7: cleaning, target, all feature groups, splits
+│   ├── eda.py           # Stage 6: all eight EDA questions
+│   ├── studies.py       # Stages 4, 5, 7: imputation, balancing, thresholds, correlation
+│   ├── evaluate.py      # Stage 11: metrics and the shared run_model() recipe (B2)
+│   ├── compare.py       # Stage 11: final comparison
 │   └── models/          # linear.py (A1), rf.py (A2), xgb.py (B1), mlp.py (B2), iforest.py (pairs)
-├── notebooks/           # 01_eda_A1.ipynb, 03_rf_A2.ipynb, ...  one owner per notebook
+├── notebooks/           # 01_data_and_eda, 02_target_and_features, 03_models, 04_evaluation
 ├── configs/config.yaml  # paths, seeds, split dates, thresholds: one source of truth
-├── results/results.csv  # every final run appends one row
-├── reports/figures/
+├── results/results.csv  # one block of rows per model and task
+├── reports/figures/, reports/tables/
 └── requirements.txt     # pinned versions
 ```
 
 **Git workflow**
 * `main` is protected: no direct pushes.
 * One branch per task (`a2/random-forest`, `b1/target`). Open a pull request and have **your partner** review it before merging. This is the within-pair review from §13.4.
-* Install `nbstripout` so notebook outputs are not committed (removes most notebook conflicts).
 * Pull `main` every morning before starting work.
 
 **Data sharing**
-* Raw and processed data never go into git. A1 uploads the cleaned Parquet files to one shared Google Drive / OneDrive folder with a version in the name (`hkust_15min_v1.parquet`). Everyone downloads the same version.
+* Raw and processed data never go into git. A1 uploads the cleaned Parquet files to one shared Google Drive / OneDrive folder (`hkust_15min.parquet`). Everyone downloads the same file.
 * If the processed data changes, bump the version and announce it in the team chat.
 
 **Same environment on four laptops**
@@ -398,8 +401,7 @@ solar-health/
 * All split dates, seeds and thresholds are read from `configs/config.yaml`, never hard-coded, so everyone's numbers are comparable.
 
 **Tracking experiments**
-* Each final run appends a row to `results/results.csv`: student, model, task, params, train/val/test metrics, date, git commit hash. This becomes the comparison table in the report.
-* Optional: MLflow running locally, if the team wants a UI.
+* Each model run replaces its own rows in `results/results.csv`: owner, model, task, evaluation set and metrics. `python -m src.compare` turns this into the comparison table in the report.
 
 **Planning & communication**
 * GitHub Projects board with columns To do / In progress / Review / Done. Every row in §13.2 becomes a card.
@@ -437,7 +439,7 @@ solar-health/
 
 ## 16. Technology Stack
 
-* **Core:** Python, Pandas (or Polars), PyArrow/Parquet, NumPy, Scikit-Learn, imbalanced-learn, rdflib (Brick metadata)
-* **Modelling:** XGBoost, Scikit-Learn (Ridge, Logistic Regression, Random Forest, MLP, Isolation Forest), Optuna (optional)
-* **Explainability & plots:** SHAP, Matplotlib, Seaborn
+* **Core:** Python, Pandas, PyArrow/Parquet, NumPy, Scikit-Learn, rdflib (Brick metadata)
+* **Modelling:** XGBoost, Scikit-Learn (Ridge, Logistic Regression, Random Forest, MLP, Isolation Forest)
+* **Explainability & plots:** permutation importance, SHAP, Matplotlib
 * **Optional serving:** FastAPI, Pydantic, Uvicorn, React, Tailwind CSS, Recharts

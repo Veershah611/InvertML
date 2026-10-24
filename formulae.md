@@ -1,193 +1,99 @@
-# InvertML: Mathematical Formulae Reference for Feature Engineering & Target Formulation
+# Formulae
 
-This document provides a comprehensive, rigorous reference of all mathematical formulas, physical definitions, engineering constants, and data-leakage prevention rules implemented in `InvertML` ([`src/features.py`](src/features.py) and [`src/targets.py`](src/targets.py)).
-
----
-
-## 1. Physical PV Baseline & Normalization Features
-
-### 1.1 Theoretical Expected AC Power ($P_{\text{expected}}$)
-Standardized physical reference power based on the **IEC 61724** benchmark for crystalline silicon PV systems:
-
-$$P_{\text{expected}}(t) = \max\left( \left(\frac{G(t)}{1000.0}\right) \times (\text{Capacity}_{\text{kWp}} \times 1000.0) \times \eta_{\text{derate}}, \, P_{\text{floor}} \right)$$
-
-* **Parameters & Constants:**
-  * $G(t) = \text{irradiance\_wm2}$: Plane-of-array/horizontal solar irradiance in $\text{W/m}^2$.
-  * $\text{Capacity}_{\text{kWp}}$: Inverter rated peak DC array capacity (in $\text{kWp}$).
-  * $\eta_{\text{derate}} = 0.78$: Standard system derating factor (covers $8\text{--}10\%$ thermal losses, $2\text{--}3\%$ soiling/dust, $1.5\text{--}2\%$ DC wiring mismatch, and $2\text{--}4\%$ inverter conversion losses).
-  * $P_{\text{floor}} = 100.0\text{ W}$: Lower bound clamp preventing division-by-zero or mathematical singularity during dawn/dusk twilight.
-
-### 1.2 Specific Yield ($Y_{\text{spec}}$)
-Standardizes electricity production across heterogeneous array sizes (ranging from $10\text{ kWp}$ to $67\text{ kWp}$ across 37 rooftops):
-
-$$Y_{\text{spec}}(t) = \frac{P_{\text{AC}}(t) / 1000.0}{\text{Capacity}_{\text{kWp}}} \quad \left[\frac{\text{kW AC}}{\text{kWp DC}}\right]$$
-
-### 1.3 Performance Ratio ($\text{PR}$)
-Instantaneous dimensionless efficiency metric comparing actual measured power to physical expectation:
-
-$$\text{PR}(t) = \text{clip}\left( \frac{P_{\text{AC}}(t)}{P_{\text{expected}}(t)}, \, 0.0, \, 2.5 \right) \quad \text{for } G(t) \ge 100.0\text{ W/m}^2$$
-
-* *Note:* During night or twilight ($G(t) < 100\text{ W/m}^2$), $\text{PR}$ is physically undefined ($\text{NaN}$) because inverter maximum power point tracking (MPPT) gates shut off.
+Every formula used in the code, with the file it lives in. Notation: $i$ = inverter, $t$ = 15-minute time step, $P$ = AC power (W), $G$ = irradiance (W/m²), $C$ = capacity (kWp).
 
 ---
 
-## 2. Relative Deviation Features (Domain Noise Cancellation)
+## 1. Data preparation (`src/prepare_data.py`)
 
-### 2.1 Campus Peer Deviation (`peer_dev_campus`)
-* **Physical Insight:** All 37 rooftop stations share the same microclimate and regional sky in Hong Kong. Passing cloud covers temporarily depress generation across all inverters simultaneously. By normalizing against the instantaneous campus median, common-mode weather noise cancels out, isolating true localized inverter hardware defects.
+**Capacity of an inverter** (from the Brick metadata, summed over its panel groups $j$):
+$$C_i = \frac{1}{1000}\sum_j \text{panels}_j \times \text{panel watts}_j$$
 
-$$\text{peer\_dev\_campus}(i, t) = \text{clip}\left( \frac{\text{PR}_i(t) - \text{Median}_{j \in \text{Campus}}(\text{PR}_j(t))}{\text{Median}_{j \in \text{Campus}}(\text{PR}_j(t)) + \epsilon}, \, -3.0, \, 3.0 \right)$$
+**Tilt.** "10deg" → 10; two roof parts "0/15deg" → average 7.5; "Mixed" → 5.
 
-* **Constants:**
-  * $\epsilon = 0.05$: Prevents division-by-zero during low-light conditions.
-  * Clipping bounds $[-3.0, +3.0]$: Stabilizes gradients for neural networks (MLP) and prevents extreme split splits in gradient boosted trees (XGBoost).
+**15-minute values** = mean of the 5-minute (power) or 1-minute (weather) readings in the bin. $n_{\text{valid}}$ = number of 5-minute power readings present (0-3).
 
-### 2.2 Rooftop / Station Peer Deviation (`peer_dev_station`)
-Normalizes an inverter against co-located inverters on the *exact same building roof*:
+**Irradiance sensor correction** (sensor change on 2023-02-14). For each month $m$ from February to December:
+$$r_m = \frac{\text{median PR in month } m \text{ of 2023 (from 14 Feb)}}{\text{median PR in month } m \text{ of 2022}}, \qquad f = \text{median}(r_m) = 0.570$$
+$$G_{\text{corrected}}(t) = f \times G(t) \quad \text{for } t \ge \text{2023-02-14}$$
 
-$$\text{peer\_dev\_station}(i, t) = \text{clip}\left( \frac{\text{PR}_i(t) - \text{Median}_{k \in \text{Station}}(\text{PR}_k(t))}{\text{Median}_{k \in \text{Station}}(\text{PR}_k(t)) + \epsilon}, \, -3.0, \, 3.0 \right)$$
+**Daylight coverage** of an inverter (daylight = $G \ge 50$ W/m²):
+$$\text{coverage}_i = 1 - \frac{\text{daylight bins with } n_{\text{valid}} = 0}{\text{all daylight bins}}, \qquad \text{kept if coverage} \ge 0.70$$
 
-### 2.3 30-Day Self-Relative Historical Deviation (`self_dev_30d`)
-* **Physical Insight:** Identifies slow, progressive hardware degradation, string disconnection, or persistent local shading by comparing an inverter against its own historical baseline under identical solar irradiance intensity.
+## 2. Cleaning (`src/dataset.py: clean`)
 
-$$\text{self\_dev\_30d}(i, t) = \text{clip}\left( \frac{\text{PR}_i(t) - \text{Baseline}_{i, 30d}(G_{\text{bin}})}{\text{Baseline}_{i, 30d}(G_{\text{bin}}) + \epsilon}, \, -3.0, \, 3.0 \right)$$
+| Rule | Action |
+|---|---|
+| $P < 0$ or $P > 1.1 \times C \times 1000$ | power set to missing (sensor error) |
+| $G < 0$ or $G > 1500$ | irradiance set to missing |
+| power missing or $n_{\text{valid}} = 0$ | $\text{is\_offline} = 1$ |
 
-* **Irradiance Bins ($G_{\text{bin}}$):**
-  $$G_{\text{bin}} = \begin{cases} 
-  0 \text{ (Low)} & 100 \le G(t) < 300\text{ W/m}^2 \\
-  1 \text{ (Medium)} & 300 \le G(t) < 600\text{ W/m}^2 \\
-  2 \text{ (High)} & G(t) \ge 600\text{ W/m}^2
-  \end{cases}$$
-* **Baseline Calculation:**
-  $$\text{Baseline}_{i, 30d}(G_{\text{bin}}) = \text{Rolling Median of } \text{PR}_i \text{ over } [t - 30\text{ days}, \, t) \text{ conditioned on } G_{\text{bin}}$$
-* **Anti-Leakage Guarantee:** The rolling window is closed strictly on the left (`closed="left"`), completely excluding timestamp $t$ and future values.
+## 3. Target (`src/dataset.py`)
 
----
+**Expected power** (0.78 = derate for temperature, wiring and inverter losses; 100 W floor avoids dividing by almost zero):
+$$P_{\text{expected}}(t) = \max\left(\frac{G(t)}{1000} \times C \times 1000 \times 0.78,\ 100\right)$$
 
-## 3. Meteorological & Thermal Interaction Features
+**Health score** (defined only when $G \ge 100$ W/m² and power was measured):
+$$\text{Health}(t) = \text{clip}\left(100 \times \frac{P(t)}{P_{\text{expected}}(t)},\ 0,\ 100\right)$$
 
-### 3.1 Thermal Stress Proxy (`thermal_stress`)
-Captures the compounding stress of intense solar irradiation combined with elevated ambient temperatures, which triggers inverter thermal throttling and severe silicon voltage drops:
+**Status:**
+$$\text{Status} = \begin{cases} \text{Healthy} & \text{Health} \ge 90 \\ \text{Warning} & 70 \le \text{Health} < 90 \\ \text{Faulty} & \text{Health} < 70 \end{cases}$$
 
-$$\text{thermal\_stress}(t) = \left(\frac{G(t)}{1000.0}\right) \times T_{\text{ambient}}(t)$$
+**What the models predict** (same inverter, exact timestamp; missing if that time is missing):
+$$y(t) = \text{Health}(t + 1\,\text{h}), \qquad \text{status\_lead}(t) = \text{Status}(t + 1\,\text{h})$$
 
-### 3.2 Temperature Delta from Standard Test Conditions (`temp_delta_stc`)
-Measures departure from standardized factory laboratory test conditions ($25.0^\circ\text{C}$):
+## 4. Features (`src/dataset.py: add_features`)
 
-$$\text{temp\_delta\_stc}(t) = T_{\text{ambient}}(t) - 25.0^\circ\text{C}$$
+**Time of day and year** (points on a circle, so 23:45 is next to 00:00 and 31 December next to 1 January):
+$$h = \text{hour} + \frac{\text{minute}}{60}: \quad \text{hour\_sin} = \sin\frac{2\pi h}{24},\ \text{hour\_cos} = \cos\frac{2\pi h}{24}$$
+$$d = \text{day of year}: \quad \text{day\_sin} = \sin\frac{2\pi d}{365.25},\ \text{day\_cos} = \cos\frac{2\pi d}{365.25}$$
 
----
+**Performance ratio** (output per kWp per 1000 W/m²; defined when $G \ge 100$):
+$$\text{PR}_i(t) = \frac{P_i(t)}{G(t) \times C_i}$$
 
-## 4. Cyclical Temporal Encodings (2D Circular Trigonometry)
+**Peer deviation** (compares an inverter with the whole campus at the same moment; a cloud lowers everyone and cancels out):
+$$\text{peer\_dev}_i(t) = \text{clip}\left(\frac{\text{PR}_i(t) - \text{median}_j \text{PR}_j(t)}{\text{median}_j \text{PR}_j(t)},\ -1,\ 2\right)$$
 
-Linear integer hours ($0\text{ to }23$) and days ($1\text{ to }365$) introduce artificial numeric discontinuities ($23 \to 0$ appears 23 steps apart; Dec 31 $\to$ Jan 1 appears 364 days apart). Continuous 2D circular projections map adjacent time intervals onto continuous Euclidean coordinates.
+**Self deviation** (compares an inverter with its own recent past; the window excludes $t$):
+$$\text{self\_dev\_30d}_i(t) = \text{Health}_i(t) - \text{median}\{\text{Health}_i(\tau) : t - 30\,\text{d} \le \tau < t\}$$
 
-### 4.1 Continuous Diurnal Cycle (Hour of Day)
-1. **Fractional Continuous Hour ($t_{\text{hour}}$):**
-   $$t_{\text{hour}} = \text{hour} + \frac{\text{minute}}{60.0} \quad \in [0.0, 23.75]$$
-2. **Radial Angle:**
-   $$\theta_{\text{hour}} = 2\pi \times \left(\frac{t_{\text{hour}}}{24.0}\right)$$
-3. **Circular Encodings:**
-   $$\text{hour\_sin} = \sin(\theta_{\text{hour}}), \quad \text{hour\_cos} = \cos(\theta_{\text{hour}})$$
+**History** (past only):
+$$\text{health\_lag\_15m}(t) = \text{Health}(t - 15\,\text{min}), \qquad \text{health\_lag\_1d}(t) = \text{Health}(t - 1\,\text{d})$$
+$$\text{health\_mean\_4h}(t) = \text{mean}\{\text{Health}(\tau) : t - 4\,\text{h} \le \tau < t\}, \qquad \text{peer\_dev\_mean\_4h} \text{ likewise}$$
 
-### 4.2 Continuous Annual Cycle (Day of Year & Seasonality)
-1. **Fractional Continuous Day ($t_{\text{day}}$):**
-   $$t_{\text{day}} = \text{day\_of\_year} + \frac{t_{\text{hour}}}{24.0} \quad \in [1.0, 366.0]$$
-2. **Radial Angle:**
-   $$\theta_{\text{day}} = 2\pi \times \left(\frac{t_{\text{day}}}{365.25}\right)$$
-3. **Circular Encodings:**
-   $$\text{day\_sin} = \sin(\theta_{\text{day}}), \quad \text{day\_cos} = \cos(\theta_{\text{day}})$$
+**Outage history** (daylight bins only, so the 06:00 dawn sleep does not count):
+$$\text{minutes\_offline\_24h}(t) = 15 \times \#\{\tau \in [t - 24\,\text{h},\ t) : \text{is\_offline}(\tau) = 1,\ G(\tau) \ge 50\}$$
 
----
+**Feature selection.** Pearson correlation on the training rows; a pair with $|r| > 0.85$ keeps one feature. Only `tilt_deg` / `multi_orientation` ($r = 0.974$) qualified, so `multi_orientation` is dropped.
 
-## 5. Physical Station Metadata Features
+## 5. Models
 
-Extracted from building engineering blueprints and Brick schema metadata:
+**Baselines** (`src/models/linear.py`):
+$$\widehat{\text{Health}}(t + 1\,\text{h}) = \text{Health}(t) \quad \text{(persistence)}$$
+$$\widehat{\text{Status}}(t + 1\,\text{h}) = \text{Status}(\text{Health}(t)) \quad \text{(health rule)}, \qquad \text{Status}\big(\text{clip}(100(1 + \text{peer\_dev}), 0, 100)\big) \quad \text{(peer rule)}$$
 
-### 5.1 Rated Capacity (`capacity_kwp`)
-Total rated DC wattage of all connected PV panel strings:
-$$\text{capacity\_kwp} = \frac{\sum_{j=1}^{M} (\text{panel\_count}_j \times \text{panel\_wattage}_j)}{1000.0}$$
+**Ridge regression** (features standardised: $z = (x - \mu_{\text{train}})/\sigma_{\text{train}}$):
+$$\min_\beta \sum_n \big(y_n - \beta_0 - \textstyle\sum_k \beta_k z_{nk}\big)^2 + \alpha \sum_k \beta_k^2$$
 
-### 5.2 Rooftop Tilt Angle (`tilt_deg`)
-Cleaned panel inclination angle (defaults to $15.0^\circ$ campus median if missing or flat):
-$$\text{tilt\_deg} = \begin{cases}
-\text{parsed slope} & \text{if clean single numeric} \\
-\text{first non-zero part} & \text{if multi-slope (e.g., '0/15deg')} \\
-15.0^\circ & \text{if missing / unrecorded}
-\end{cases}$$
+**Logistic regression** (three classes, softmax):
+$$P(\text{class } c \mid x) = \frac{e^{w_c \cdot z}}{\sum_{c'} e^{w_{c'} \cdot z}}$$
 
-### 5.3 Building Elevation (`altitude_m`)
-Elevation of the rooftop installation above sea level in meters ($20.0\text{ m} \le \text{altitude\_m} \le 120.0\text{ m}$).
+**Balanced sample weights** (Stage 5; $N$ rows, $K = 3$ classes, $N_c$ rows of class $c$):
+$$w_c = \frac{N}{K \times N_c}$$
+so each class contributes the same total weight to training.
 
-### 5.4 Rooftop Compass Orientation Encodings
-Derived from the azimuth compass heading angle $\phi \in [0^\circ, 360^\circ)$:
-* **South-Facing (`orient_south`):** Captures optimal peak solar midday exposure:
-  $$\text{orient\_south} = \mathbb{I}(135^\circ \le \phi \le 225^\circ)$$
-* **East/West-Facing (`orient_east_west`):** Captures asymmetric morning or evening generation:
-  $$\text{orient\_east\_west} = \mathbb{I}((45^\circ \le \phi < 135^\circ) \lor (225^\circ < \phi \le 315^\circ))$$
-* **Mixed / Multi-string Rooftop (`orient_mixed`):**
-  $$\text{orient\_mixed} = \mathbb{I}(\text{azimuth contains 'mixed'})$$
+**Random Forest:** average of many decision trees, each trained on a random sample of rows and features. **XGBoost:** a sum of small trees, each fitted to the remaining errors of the previous ones, scaled by the learning rate $\eta$: $\hat y = \sum_k \eta\, f_k(x)$. **MLP:** layers $a^{(l+1)} = \text{ReLU}(W^{(l)} a^{(l)} + b^{(l)})$, trained with Adam and an L2 penalty $\alpha \lVert W \rVert^2$.
 
----
+**Isolation Forest:** random trees split the data at random values; the anomaly score of a point is based on its average path length $E[h(x)]$ (number of splits needed to isolate it). Short paths mean unusual points. The `contamination` setting is the share of points flagged.
 
-## 6. Outage & Historical Lag / Rolling Window Features (Pair A)
+## 6. Metrics (`src/evaluate.py`)
 
-### 6.1 Telemetry Offline Indicator (`is_offline`)
-Identifies communication dropout or system shutdown:
-$$\text{is\_offline}(t) = \mathbb{I}(P_{\text{AC}}(t) \text{ is NaN} \lor n_{\text{valid\_5min}}(t) = 0)$$
+$$\text{RMSE} = \sqrt{\tfrac{1}{N}\textstyle\sum (y - \hat y)^2}, \qquad \text{MAE} = \tfrac{1}{N}\textstyle\sum |y - \hat y|, \qquad R^2 = 1 - \frac{\sum (y - \hat y)^2}{\sum (y - \bar y)^2}$$
 
-### 6.2 Prior 24-Hour Daylight Outage Duration (`minutes_offline_24h`)
-Calculates cumulative offline duration strictly during daylight hours over the preceding 24 clock hours:
-$$\text{minutes\_offline\_24h}(t) = 15 \times \sum_{\tau \in [t - 24\text{h}, \, t)} \mathbb{I}(\text{is\_offline}(\tau) = 1 \land G(\tau) \ge 50\text{ W/m}^2)$$
+$$\text{Faulty recall} = \frac{\text{Faulty rows predicted Faulty}}{\text{all Faulty rows}}, \qquad \text{Faulty precision} = \frac{\text{Faulty rows predicted Faulty}}{\text{all rows predicted Faulty}}$$
 
-### 6.3 Historical Autoregressive Lags & Rolling Aggregations
-For signal $S \in \{\text{performance\_ratio}, \, \text{peer\_dev\_campus}\}$:
-* **Discrete Lags:**
-  $$S_{\text{lag}}(t) = S(t - \Delta t), \quad \Delta t \in \{15\text{ min}, \, 1\text{ h}, \, 1\text{ day}\}$$
-* **Past Rolling Statistics over Window $W \in \{1\text{ h}, \, 4\text{ h}, \, 1\text{ day}\}$:**
-  $$\mu_{S, W}(t) = \frac{1}{|W|} \sum_{\tau \in [t - W, \, t)} S(\tau)$$
-  $$\sigma_{S, W}(t) = \sqrt{\frac{1}{|W| - 1} \sum_{\tau \in [t - W, \, t)} \left(S(\tau) - \mu_{S, W}(t)\right)^2}$$
+$$F_1 = \frac{2 \times \text{precision} \times \text{recall}}{\text{precision} + \text{recall}}, \qquad \text{macro-}F_1 = \tfrac{1}{3}\left(F_1^{\text{Healthy}} + F_1^{\text{Warning}} + F_1^{\text{Faulty}}\right)$$
 
----
+**Anomaly detection:** detection rate = flagged fault rows / all fault rows; false-alarm rate = flagged normal rows / all normal rows.
 
-## 7. Mathematical Target Formulation & Anti-Leakage Protocol
-
-### 7.1 Continuous Health Score Target ($0.0 \le \text{Health Score} \le 100.0$)
-$$\text{Health}(t) = \min\left(100.0, \, \max\left(0.0, \, \text{PR}(t) \times 100.0\right)\right)$$
-
-### 7.2 3-Class Discrete Operational Status Target
-$$\text{Status}(t) = \begin{cases}
-\textbf{Healthy} & \text{if } \text{Health}(t) \ge 90.0 \\
-\textbf{Warning} & \text{if } 70.0 \le \text{Health}(t) < 90.0 \\
-\textbf{Faulty} & \text{if } \text{Health}(t) < 70.0
-\end{cases}$$
-
-### 7.3 Data Leakage Prevention Engine (§7.2 Compliance)
-* **Option A — Lead Forecasting Target (Project Benchmark Standard):**
-  $$\text{Target} = \text{Health}(t + 1\text{ h}) = \text{Health}(t + 4 \times 15\text{ min})$$
-  * The feature matrix $X(t)$ uses observations strictly up to time $t$. Current power $P_{\text{AC}}(t)$ is valid because it precedes future health by one hour.
-* **Option B — Diagnostic Contemporaneous Proxy (Feature Purging):**
-  $$\text{Target} = \text{Health}(t)$$
-  * Explicitly purges $\{P_{\text{AC}}(t), Y_{\text{spec}}(t), P_{\text{expected}}(t)\}$ from $X(t)$ to prevent trivial linear inversion.
-
----
-
-## 8. Summary of Final 13 Selected Features (Post-Collinearity Pruning)
-
-Pairs with Pearson $|r| > 0.85$ on the training split were pruned to prevent multicollinear variance inflation. The **13 protected features** surviving selection are:
-
-| # | Feature Name | Formula / Encoding | Physical Meaning |
-|---|:---|:---|:---|
-| 1 | `hour_sin` | $\sin(2\pi \cdot t_{\text{hour}} / 24)$ | Cyclical diurnal time component |
-| 2 | `day_sin` | $\sin(2\pi \cdot t_{\text{day}} / 365.25)$ | Cyclical annual seasonal solar cycle |
-| 3 | `day_cos` | $\cos(2\pi \cdot t_{\text{day}} / 365.25)$ | Cyclical annual seasonal solar cycle |
-| 4 | `capacity_kwp` | $\sum (\text{count} \times \text{wattage}) / 1000$ | Inverter rated peak DC capacity |
-| 5 | `tilt_deg` | Cleaned slope angle | Rooftop installation inclination |
-| 6 | `altitude_m` | Elevation in meters | Building height above sea level |
-| 7 | `orient_south` | $\mathbb{I}(135^\circ \le \phi \le 225^\circ)$ | Flag for south-facing arrays |
-| 8 | `orient_east_west` | $\mathbb{I}(\text{east or west azimuth})$ | Flag for morning/evening arrays |
-| 9 | `orient_mixed` | $\mathbb{I}(\text{mixed orientation string})$ | Flag for multi-tilt/flat roofs |
-| 10 | `peer_dev_campus` | $(\text{PR}_i - \text{Med}_{\text{campus}}) / (\text{Med}_{\text{campus}} + 0.05)$ | Cancels campus-wide weather noise |
-| 11 | `peer_dev_station`| $(\text{PR}_i - \text{Med}_{\text{station}}) / (\text{Med}_{\text{station}} + 0.05)$ | Same-rooftop relative deviation |
-| 12 | `self_dev_30d` | $(\text{PR}_i - \text{Base}_{30\text{d}}) / (\text{Base}_{30\text{d}} + 0.05)$ | Trailing 30-day degradation tracking |
-| 13 | `thermal_stress` | $(G / 1000.0) \times T_{\text{ambient}}$ | Combined sunlight & thermal load |
+**Permutation importance** of feature $k$: score on validation minus the score after shuffling column $k$ (averaged over 3 shuffles). A large drop means the model relies on that feature.

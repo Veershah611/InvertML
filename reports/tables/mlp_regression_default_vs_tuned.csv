@@ -1,0 +1,5 @@
+set,rows,rmse,mae,r2,version,tuned_settings
+val,182731,11.188,6.149,0.615,default,"{'model__alpha': 0.01, 'model__hidden_layer_sizes': (64, 32)}"
+test,366110,10.726,5.886,0.546,default,"{'model__alpha': 0.01, 'model__hidden_layer_sizes': (64, 32)}"
+val,182731,11.404,5.916,0.6,tuned,"{'model__alpha': 0.01, 'model__hidden_layer_sizes': (64, 32)}"
+test,366110,10.835,5.57,0.537,tuned,"{'model__alpha': 0.01, 'model__hidden_layer_sizes': (64, 32)}"

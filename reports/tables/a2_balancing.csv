@@ -1,3 +1,0 @@
-strategy,train_rows,val_rows,macro_f1,faulty_recall,faulty_precision,faulty_pr_auc,confusion_matrix
-class_weight,30000,15000,0.6443,0.6637,0.6344,0.7449,"[[975, 183, 311], [319, 9925, 1655], [243, 485, 904]]"
-undersampling,13626,15000,0.6774,0.6263,0.789,0.7494,"[[920, 336, 213], [94, 11220, 585], [152, 852, 628]]"

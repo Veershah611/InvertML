@@ -1,4 +1,0 @@
-strategy,train_rows,val_rows,macro_f1,faulty_recall,faulty_precision,faulty_pr_auc,confusion_matrix,selected
-unbalanced,60000,183667,0.5469,0.3789,0.7292,0.5593,"[[143653, 1226, 861], [15380, 3009, 1656], [8685, 2421, 6776]]",False
-undersampling,26892,183667,0.5715,0.4059,0.6766,0.5704,"[[138673, 5250, 1817], [13383, 5010, 1652], [7334, 3290, 7258]]",True
-thresholded_regressor,60000,183667,0.5702,0.3696,0.7819,0.5913,"[[125387, 19687, 666], [9692, 9175, 1178], [4575, 6697, 6610]]",False

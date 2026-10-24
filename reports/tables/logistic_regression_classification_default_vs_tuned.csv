@@ -1,0 +1,5 @@
+set,rows,macro_f1,faulty_recall,faulty_precision,version,tuned_settings
+val,182731,0.574,0.724,0.471,default,{'model__C': 1}
+test,366110,0.572,0.706,0.5,default,{'model__C': 1}
+val,182731,0.574,0.724,0.471,tuned,{'model__C': 1}
+test,366110,0.572,0.706,0.5,tuned,{'model__C': 1}

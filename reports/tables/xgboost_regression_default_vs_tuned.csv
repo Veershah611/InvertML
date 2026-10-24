@@ -1,0 +1,5 @@
+set,rows,rmse,mae,r2,version,tuned_settings
+val,182731,12.046,6.502,0.554,default,"{'model__learning_rate': 0.05, 'model__max_depth': 6}"
+test,366110,11.829,6.49,0.448,default,"{'model__learning_rate': 0.05, 'model__max_depth': 6}"
+val,182731,10.732,5.821,0.646,tuned,"{'model__learning_rate': 0.05, 'model__max_depth': 6}"
+test,366110,10.69,5.61,0.549,tuned,"{'model__learning_rate': 0.05, 'model__max_depth': 6}"

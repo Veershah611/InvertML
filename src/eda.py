@@ -1,316 +1,200 @@
-"""Stage 6 EDA (A1): analysis and plotting functions.
+"""Stage 6: exploratory data analysis. Two questions per team member (section 6).
 
-Q1. How do AC power and irradiance relate, per inverter?
-Q2. Where are the gaps / offline events?
+A1  Q1 How do AC power and irradiance relate?  (+ sensor change, night threshold)
+    Q2 Where are the gaps / offline events?
+A2  Q1 How does temperature affect output?
+    Q2 Are features redundant?
+B1  Q1 Do the inverters degrade over the years?
+    Q2 Which inverters underperform consistently?
+B2  Q1 How strong is seasonality?
+    Q2 How are the classes distributed?
 
-notebooks/01_eda_A1.ipynb calls these functions; figures go to reports/figures.
+Every function draws one simple figure into reports/figures/.
+Run: python -m src.eda
 """
-from pathlib import Path
-
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import yaml
-from matplotlib.colors import LinearSegmentedColormap
 
-ROOT = Path(__file__).resolve().parents[1]
-CONFIG = yaml.safe_load(open(ROOT / "configs" / "config.yaml", encoding="utf-8"))
-PROCESSED = ROOT / CONFIG["paths"]["processed"]
-FIGURES = ROOT / "reports" / "figures"
-TABLES = ROOT / "reports" / "tables"
-DAYLIGHT_WM2 = CONFIG["daylight_irradiance_wm2"]
-SEED = CONFIG["random_state"]
+from src.common import CONFIG, PROCESSED, TABLES, save_figure
+from src.dataset import CANDIDATE_FEATURES, load
 
-# Colours (one sequential blue ramp, neutral inks and grid).
-BLUE = "#2a78d6"
-INK = "#0b0b0b"
-INK_2 = "#52514e"
-MUTED = "#898781"
-GRID = "#e1e0d9"
-NO_DATA = "#e8e7e2"
-SEQ_BLUES = LinearSegmentedColormap.from_list(
-    "seq_blues", ["#f2f7fd", "#cde2fb", "#86b6ef", "#3987e5", "#1c5cab", "#0d366b"])
-
-COLUMNS = ["inverter_id", "time", "ac_power_w", "n_valid_5min",
-           "irradiance_wm2", "irradiance_raw_wm2", "capacity_kwp"]
+SEASONS = {12: "Winter", 1: "Winter", 2: "Winter", 3: "Spring", 4: "Spring", 5: "Spring",
+           6: "Summer", 7: "Summer", 8: "Summer", 9: "Autumn", 10: "Autumn", 11: "Autumn"}
 
 
-def set_style():
-    plt.rcParams.update({
-        "figure.dpi": 110, "savefig.dpi": 150, "savefig.bbox": "tight",
-        "figure.facecolor": "white", "axes.facecolor": "white",
-        "axes.edgecolor": "#c3c2b7", "axes.labelcolor": INK_2,
-        "axes.titlecolor": INK, "axes.titlesize": 11, "axes.labelsize": 10,
-        "axes.spines.top": False, "axes.spines.right": False,
-        "axes.grid": True, "axes.axisbelow": True,
-        "grid.color": GRID, "grid.linewidth": 0.6,
-        "xtick.color": MUTED, "ytick.color": MUTED,
-        "xtick.labelsize": 8, "ytick.labelsize": 8,
-        "font.size": 9, "legend.frameon": False,
-    })
+def specific_yield(df):
+    """AC power per kW of installed panels (kW/kWp), so big and small arrays compare."""
+    return df["ac_power_w"] / 1000 / df["capacity_kwp"]
 
 
-def save(fig, name):
-    FIGURES.mkdir(parents=True, exist_ok=True)
-    path = FIGURES / f"{name}.png"
-    fig.savefig(path)
-    return path
+# ---------------------------------------------------------------- A1
 
-
-def load(columns=COLUMNS):
-    """Load the 15-min table and add specific yield (kW per kWp)."""
-    df = pd.read_parquet(PROCESSED / "hkust_15min_v1.parquet", columns=columns)
-    df["inverter_id"] = df["inverter_id"].astype(str)
-    df["specific_yield"] = df["ac_power_w"] / 1000 / df["capacity_kwp"]
-    return df
-
-
-# ---------------------------------------------------------------- Q1
-
-def daylight_valid(df):
-    """Rows usable for the power-irradiance relationship."""
-    return df[(df["irradiance_wm2"] >= DAYLIGHT_WM2) & df["specific_yield"].notna()]
-
-
-def plot_yield_vs_irradiance(df):
-    """All inverters: specific yield vs irradiance as a 2D density (hexbin)."""
-    d = df[df["irradiance_wm2"].notna() & df["specific_yield"].notna()]
+def power_vs_irradiance(df):
+    d = df[df["irradiance_wm2"] >= 50].dropna(subset=["ac_power_w"])
     fig, ax = plt.subplots(figsize=(7, 4.5))
-    hb = ax.hexbin(d["irradiance_wm2"], d["specific_yield"], gridsize=90,
-                   extent=(0, 1300, 0, 1.3), bins="log", cmap=SEQ_BLUES, mincnt=1,
-                   linewidths=0)
-    ax.plot([0, 1300], [0, 1.3], color=INK_2, lw=1, ls="--")
-    ax.annotate("1 kW/kWp per 1000 W/m²", xy=(1150, 1.15), xytext=(820, 1.22),
-                color=INK_2, fontsize=8)
-    ax.set_xlim(0, 1300)
-    ax.set_ylim(0, 1.3)
-    ax.set_xlabel("Irradiance (W/m², weather station)")
-    ax.set_ylabel("Specific yield (kW per kWp)")
-    ax.set_title(f"AC power vs irradiance, all 44 inverters ({len(d):,} 15-min bins)")
-    ax.grid(False)
-    fig.colorbar(hb, ax=ax, label="Bins per hexagon (log scale)", shrink=0.85)
-    return fig
+    hb = ax.hexbin(d["irradiance_wm2"], specific_yield(d), gridsize=70, bins="log",
+                   extent=(0, 1100, 0, 1.2), cmap="Blues", mincnt=1)
+    ax.plot([0, 1100], [0, 1.1], "k--", label="1 kW/kWp at 1000 W/m2")
+    ax.set(title="AC power vs irradiance, all inverters", xlabel="Irradiance (W/m2)",
+           ylabel="Specific yield (kW per kWp)")
+    ax.legend(loc="upper left")
+    fig.colorbar(hb, label="15-min rows (log)")
+    save_figure(fig, "eda_a1_power_vs_irradiance")
 
 
-def per_inverter_fit(df):
-    """Per inverter (daylight bins only): Pearson r, slope through the origin
-    in kW/kWp per 1000 W/m2, and the 99th percentile of specific yield."""
-    d = daylight_valid(df)
-    rows = []
-    for inv, g in d.groupby("inverter_id"):
-        x = g["irradiance_wm2"].to_numpy(float) / 1000
-        y = g["specific_yield"].to_numpy(float)
-        rows.append({
-            "inverter_id": inv,
-            "n_bins": len(g),
-            "pearson_r": np.corrcoef(x, y)[0, 1],
-            "slope_kw_per_kwp": (x @ y) / (x @ x),
-            "p99_specific_yield": np.quantile(y, 0.99),
-            "capacity_kwp": g["capacity_kwp"].iloc[0],
-        })
-    out = pd.DataFrame(rows).sort_values("slope_kw_per_kwp").reset_index(drop=True)
-    return out.round({"pearson_r": 3, "slope_kw_per_kwp": 3, "p99_specific_yield": 3})
-
-
-def plot_per_inverter_grid(df, fits, sample=1500):
-    """Small multiples: one scatter per inverter, ordered by fitted slope."""
-    d = daylight_valid(df)
-    order = fits["inverter_id"].tolist()
-    ncols = 6
-    nrows = int(np.ceil(len(order) / ncols))
-    fig, axes = plt.subplots(nrows, ncols, figsize=(13, 2.0 * nrows),
-                             sharex=True, sharey=True)
-    for ax, inv in zip(axes.flat, order):
-        g = d[d["inverter_id"] == inv]
-        g = g.sample(min(sample, len(g)), random_state=SEED)
-        ax.scatter(g["irradiance_wm2"], g["specific_yield"], s=2, color=BLUE,
-                   alpha=0.25, linewidths=0)
-        slope = fits.loc[fits["inverter_id"] == inv, "slope_kw_per_kwp"].item()
-        ax.plot([0, 1300], [0, 1.3 * slope], color=INK, lw=1)
-        ax.set_title(f"{inv.removesuffix('_inverter')}\nslope {slope:.2f}", fontsize=7.5)
-        ax.set_xlim(0, 1300)
-        ax.set_ylim(0, 1.3)
-    for ax in list(axes.flat)[len(order):]:
-        ax.set_visible(False)
-    fig.supxlabel("Irradiance (W/m²)", color=INK_2)
-    fig.supylabel("Specific yield (kW per kWp)", color=INK_2)
-    fig.suptitle("Per-inverter power vs irradiance (daylight bins, 1,500-point sample each; "
-                 "line = fitted slope)", color=INK, fontsize=11)
-    fig.tight_layout(rect=(0.02, 0.02, 1, 0.97))
-    return fig
-
-
-def weekly_yield_ratio(df):
-    """Campus-wide weekly median of specific yield / (irradiance / 1000).
-
-    For a healthy system this ratio is roughly constant (it is close to the
-    performance ratio), so a sudden step for all inverters at once points to
-    the irradiance sensor, not the inverters. Computed on the raw sensor
-    values (irradiance_raw_wm2) and on the corrected values that
-    prepare_data.py writes from the sensor change onwards."""
-    d = daylight_valid(df)
+def sensor_change(df):
+    """Output per unit of sunlight, week by week. A sudden drop for every inverter
+    at once means the sunlight sensor changed, not the inverters."""
+    d = df[(df["irradiance_raw_wm2"] >= 100)].dropna(subset=["ac_power_w"])
     week = d["time"].dt.to_period("W").dt.start_time
-    raw = (d["specific_yield"] / (d["irradiance_raw_wm2"] / 1000)).groupby(week).median()
-    corrected = (d["specific_yield"] / (d["irradiance_wm2"] / 1000)).groupby(week).median()
-    return pd.DataFrame({"median_ratio": raw, "median_ratio_corrected": corrected}).reset_index(names="time")
+    fig, ax = plt.subplots(figsize=(9, 3.5))
+    for column, label in [("irradiance_raw_wm2", "raw sensor"), ("irradiance_wm2", "after correction")]:
+        ratio = specific_yield(d) / (d[column] / 1000)
+        ax.plot(ratio.groupby(week).median(), label=label)
+    ax.axvline(pd.Timestamp(CONFIG["irradiance_sensor_change"]), color="red", linestyle="--",
+               label="2023-02-14")
+    ax.set(title="Output per unit irradiance: step change on 2023-02-14 (sensor)",
+           ylabel="kW/kWp per 1000 W/m2", ylim=(0, 1.3))
+    ax.legend()
+    save_figure(fig, "eda_a1_sensor_change")
 
 
-def plot_weekly_yield_ratio(weekly, change_date="2023-02-14"):
-    fig, ax = plt.subplots(figsize=(10, 3.8))
-    ax.plot(weekly["time"], weekly["median_ratio"], color=BLUE, lw=2, label="raw sensor")
-    if "median_ratio_corrected" in weekly:
-        ax.plot(weekly["time"], weekly["median_ratio_corrected"], color=INK_2, lw=1.2, ls=":",
-                label="after correction in prepare_data.py")
-        ax.legend(loc="lower left", fontsize=8)
-    ax.axvline(pd.Timestamp(change_date), color=INK_2, lw=1, ls="--")
-    ax.annotate(f"Irradiance readings jump\n{change_date}", xy=(pd.Timestamp(change_date), 1.1),
-                xytext=(10, 0), textcoords="offset points", color=INK_2, fontsize=8, va="top")
-    ax.set_ylim(0, 1.2)
-    ax.set_ylabel("Median specific yield per\n1000 W/m² irradiance")
-    ax.set_xlabel("Week")
-    ax.set_title("Output per unit irradiance, all inverters: a step change in Feb 2023 "
-                 "(sensor, not inverters)")
-    return fig
+def night_threshold(df):
+    """Below what light level do inverters stop producing? (justifies 50 W/m2)"""
+    d = df[df["irradiance_wm2"] < 150].dropna(subset=["ac_power_w"])
+    producing = (d["ac_power_w"] > 0).groupby((d["irradiance_wm2"] // 5) * 5).mean() * 100
+    fig, ax = plt.subplots(figsize=(7, 3.5))
+    ax.plot(producing.index, producing.values, marker=".")
+    ax.axvline(50, color="red", linestyle="--", label="50 W/m2")
+    ax.set(title="Share of bins producing power at low light", xlabel="Irradiance (W/m2)",
+           ylabel="% of bins with power > 0")
+    ax.legend()
+    save_figure(fig, "eda_a1_night_threshold")
 
 
-def low_irradiance_profile(df, max_wm2=150, step=5):
-    """Behaviour near dawn/dusk: per irradiance bin, the share of bins with
-    any AC output and the median specific yield (valid power readings only)."""
-    d = df[df["irradiance_wm2"].notna() & df["specific_yield"].notna()
-           & (df["irradiance_wm2"] < max_wm2)].copy()
-    d["irr_bin"] = (d["irradiance_wm2"] // step * step).astype(int)
-    out = d.groupby("irr_bin").agg(
-        n_bins=("specific_yield", "size"),
-        share_producing=("ac_power_w", lambda s: (s > 0).mean()),
-        median_yield=("specific_yield", "median"),
-        q25_yield=("specific_yield", lambda s: s.quantile(0.25)),
-        q75_yield=("specific_yield", lambda s: s.quantile(0.75)),
-    )
-    return out.reset_index()
-
-
-def plot_low_irradiance(profile):
-    """Two panels sharing the x axis (two measures -> two charts, not two y axes)."""
-    fig, (a1, a2) = plt.subplots(2, 1, figsize=(7, 5.5), sharex=True)
-    x = profile["irr_bin"] + 2.5
-    a1.plot(x, 100 * profile["share_producing"], color=BLUE, lw=2)
-    a1.set_ylabel("Bins with AC output > 0 (%)")
-    a1.set_ylim(0, 102)
-    a1.set_title("Low-irradiance behaviour (evidence for the night-time threshold)")
-    a2.fill_between(x, profile["q25_yield"], profile["q75_yield"], color=BLUE,
-                    alpha=0.2, linewidth=0, label="Interquartile range")
-    a2.plot(x, profile["median_yield"], color=BLUE, lw=2, label="Median")
-    a2.set_ylabel("Specific yield (kW per kWp)")
-    a2.set_xlabel("Irradiance (W/m², 5 W/m² bins)")
-    a2.legend(loc="upper left")
-    for ax in (a1, a2):
-        for t in (20, 50):
-            ax.axvline(t, color=MUTED, lw=1, ls=":")
-    a1.text(21, 5, "20", color=MUTED, fontsize=8)
-    a1.text(51, 5, "50 W/m²", color=MUTED, fontsize=8)
-    fig.tight_layout()
-    return fig
-
-
-# ---------------------------------------------------------------- Q2
-
-def plot_gap_heatmap(gaps=None, coverage=None):
-    """Inverter x month heatmap of % daylight bins missing.
-    Grey = inverter not yet installed (no rows for that month)."""
-    gaps = gaps if gaps is not None else pd.read_csv(TABLES / "gaps_by_inverter_month.csv")
-    coverage = coverage if coverage is not None else pd.read_csv(TABLES / "coverage_by_inverter.csv")
-    grid = gaps.pivot(index="inverter_id", columns="month", values="missing_pct")
-    months = pd.period_range("2021-05", "2023-12", freq="M").astype(str)
-    grid = grid.reindex(index=coverage.sort_values("coverage")["inverter_id"],
-                        columns=months)
-
-    fig, ax = plt.subplots(figsize=(12, 9))
-    ax.set_facecolor(NO_DATA)
-    im = ax.imshow(grid.to_numpy(float), aspect="auto", cmap=SEQ_BLUES,
-                   vmin=0, vmax=100, interpolation="nearest")
-    ax.set_yticks(range(len(grid.index)))
-    ax.set_yticklabels([i.removesuffix("_inverter") for i in grid.index], fontsize=7)
-    ticks = [i for i, m in enumerate(months) if m.endswith(("-01", "-07"))]
-    ax.set_xticks(ticks)
-    ax.set_xticklabels([months[i] for i in ticks], fontsize=8)
+def gap_heatmap():
+    gaps = pd.read_csv(TABLES / "gaps_by_inverter_month.csv")
+    grid = gaps.pivot(index="inverter_id", columns="month", values="missing_share") * 100
+    fig, ax = plt.subplots(figsize=(11, 8))
+    im = ax.imshow(grid, aspect="auto", cmap="Reds", vmin=0, vmax=100)
+    ax.set_yticks(range(len(grid)), [i.replace("_inverter", "") for i in grid.index], fontsize=7)
+    ticks = range(0, len(grid.columns), 6)
+    ax.set_xticks(ticks, [grid.columns[i] for i in ticks])
+    ax.set_title("% of daylight data missing per inverter and month (white = not installed yet)")
     ax.grid(False)
-    ax.set_title("Missing daylight data per inverter and month "
-                 "(rows sorted by overall coverage, lowest first; grey = not yet installed)")
-    fig.colorbar(im, ax=ax, label="Daylight bins missing (%)", shrink=0.6)
-    return fig
-
-
-def gap_runs(df):
-    """Consecutive runs of missing daylight bins per inverter.
-
-    Only daylight bins (irradiance >= threshold) are used, in time order, so a
-    multi-day outage counts as one run and nights do not break it. Each run is
-    measured in 15-min daylight bins."""
-    d = df[df["irradiance_wm2"] >= DAYLIGHT_WM2].sort_values(["inverter_id", "time"])
-    missing = (d["n_valid_5min"] == 0).to_numpy()
-    inverter = d["inverter_id"].to_numpy()
-    new_run = np.r_[True, (missing[1:] != missing[:-1]) | (inverter[1:] != inverter[:-1])]
-    run_id = np.cumsum(new_run)
-    runs = pd.DataFrame({"run": run_id, "missing": missing, "inverter_id": inverter,
-                         "time": d["time"].to_numpy()})
-    runs = runs[runs["missing"]].groupby("run").agg(
-        inverter_id=("inverter_id", "first"), start=("time", "first"),
-        end=("time", "last"), length_bins=("missing", "size"))
-    return runs.reset_index(drop=True)
-
-
-RUN_BUCKETS = [(1, 1, "15 min"), (2, 4, "30 min-1 h"), (5, 16, "1-4 h"),
-               (17, 48, "4-12 h"), (49, 10**9, "> 12 h (multi-day)")]
-
-
-def gap_run_summary(runs):
-    total = runs["length_bins"].sum()
-    rows = []
-    for lo, hi, label in RUN_BUCKETS:
-        r = runs[runs["length_bins"].between(lo, hi)]
-        rows.append({"gap_length": label, "n_runs": len(r),
-                     "pct_of_runs": round(100 * len(r) / len(runs), 1),
-                     "missing_bins": int(r["length_bins"].sum()),
-                     "pct_of_missing_bins": round(100 * r["length_bins"].sum() / total, 1)})
-    return pd.DataFrame(rows)
-
-
-def plot_gap_runs(summary):
-    """Two panels: how many gaps vs how much missing data, per gap length."""
-    fig, (a1, a2) = plt.subplots(1, 2, figsize=(11, 3.8), sharey=True)
-    y = np.arange(len(summary))
-    for ax, col, title in [(a1, "pct_of_runs", "Share of gaps (%)"),
-                           (a2, "pct_of_missing_bins", "Share of missing daylight bins (%)")]:
-        ax.barh(y, summary[col], color=BLUE, height=0.6)
-        for yi, v in zip(y, summary[col]):
-            ax.text(v + 1, yi, f"{v:.1f}%", va="center", color=INK_2, fontsize=8)
-        ax.set_title(title)
-        ax.set_xlim(0, 105)
-        ax.grid(axis="y", visible=False)
-    a1.set_yticks(y)
-    a1.set_yticklabels(summary["gap_length"])
-    a1.invert_yaxis()
-    a1.set_ylabel("Gap length (consecutive daylight bins)")
-    fig.suptitle("Gaps are mostly whole days or longer; short gaps (up to 1 h) are rare",
-                 color=INK, fontsize=11)
-    fig.tight_layout()
-    return fig
+    fig.colorbar(im, label="% missing")
+    save_figure(fig, "eda_a1_gap_heatmap")
 
 
 def missing_by_hour(df):
-    d = df.assign(hour=df["time"].dt.hour, missing=df["n_valid_5min"] == 0)
-    return (100 * d.groupby("hour")["missing"].mean()).round(2).rename("pct_missing").reset_index()
-
-
-def plot_missing_by_hour(by_hour):
+    missing = (df["n_valid_5min"] == 0).groupby(df["time"].dt.hour).mean() * 100
     fig, ax = plt.subplots(figsize=(7, 3.5))
-    ax.bar(by_hour["hour"], by_hour["pct_missing"], color=BLUE, width=0.6)
-    for h, v in zip(by_hour["hour"], by_hour["pct_missing"]):
-        ax.text(h, v + 0.6, f"{v:.1f}", ha="center", color=INK_2, fontsize=8)
-    ax.set_xticks(by_hour["hour"])
-    ax.set_xticklabels([f"{h:02d}:00" for h in by_hour["hour"]], fontsize=8)
-    ax.set_xlabel("Hour of day (logger window 06:00-17:59)")
-    ax.set_ylabel("15-min bins with no valid power (%)")
-    ax.set_title("Missing data by hour of day (all bins, all inverters)")
-    ax.grid(axis="x", visible=False)
-    return fig
+    ax.bar(missing.index, missing.values)
+    ax.set(title="Missing data by hour (06:00 = inverters still asleep)", xlabel="Hour of day",
+           ylabel="% of bins with no power reading")
+    save_figure(fig, "eda_a1_missing_by_hour")
+
+
+# ---------------------------------------------------------------- A2
+
+def temperature_effect(table):
+    """Performance ratio in strong sun, by air temperature: hot panels convert less light.
+    (The health score is capped at 100, so the uncapped performance ratio is used here.)"""
+    sunny = table[table["irradiance_wm2"] >= 600]
+    groups = sunny.groupby((sunny["temp_c"] // 2) * 2)["pr"]
+    by_temp = groups.median()[groups.size() >= 500]          # skip bins with few rows
+    fig, ax = plt.subplots(figsize=(7, 3.5))
+    ax.plot(by_temp.index, by_temp.values, marker="o")
+    ax.set(title="Median performance ratio in strong sun (>= 600 W/m2) by temperature",
+           xlabel="Air temperature (C, 2-degree bins)", ylabel="Performance ratio")
+    save_figure(fig, "eda_a2_temperature_effect")
+    return by_temp
+
+
+def feature_correlation(table):
+    corr = table[table["split"] == "train"][CANDIDATE_FEATURES].corr()
+    fig, ax = plt.subplots(figsize=(9, 7.5))
+    im = ax.imshow(corr, cmap="RdBu_r", vmin=-1, vmax=1)
+    ax.set_xticks(range(len(corr)), corr.columns, rotation=90, fontsize=7)
+    ax.set_yticks(range(len(corr)), corr.columns, fontsize=7)
+    ax.set_title("Correlation between features (training period)")
+    ax.grid(False)
+    fig.colorbar(im, label="Pearson r")
+    save_figure(fig, "eda_a2_feature_correlation")
+
+
+# ---------------------------------------------------------------- B1
+
+def peak_sun(table):
+    """Clear midday rows (11:00-14:00, >= 600 W/m2): the fairest time to compare."""
+    hour = table["time"].dt.hour
+    return table[(hour >= 11) & (hour < 14) & (table["irradiance_wm2"] >= 600)]
+
+
+def degradation(table):
+    peak = peak_sun(table)
+    yearly = peak.groupby(peak["time"].dt.year)["pr"].median()
+    fig, ax = plt.subplots(figsize=(6, 3.5))
+    ax.bar(yearly.index.astype(str), yearly.values)
+    for x, y in enumerate(yearly.values):
+        ax.text(x, y, f"{y:.3f}", ha="center", va="bottom")
+    ax.set(title="Median performance ratio at peak sun, per year", ylabel="Performance ratio")
+    save_figure(fig, "eda_b1_degradation")
+    return yearly
+
+
+def underperformers(table):
+    peak = peak_sun(table)
+    by_inverter = (peak.groupby("inverter_id")["pr"].median() / peak["pr"].median() - 1) * 100
+    by_inverter = by_inverter.sort_values()
+    fig, ax = plt.subplots(figsize=(7, 9))
+    colors = ["tab:red" if v < -10 else "tab:blue" for v in by_inverter.values]
+    ax.barh([i.replace("_inverter", "") for i in by_inverter.index], by_inverter.values, color=colors)
+    ax.axvline(0, color="black")
+    ax.set(title="Each inverter vs campus median at peak sun (red = more than 10 % below)",
+           xlabel="% difference in performance ratio")
+    ax.tick_params(axis="y", labelsize=7)
+    save_figure(fig, "eda_b1_underperformers")
+    return by_inverter
+
+
+# ---------------------------------------------------------------- B2
+
+def seasonality(df):
+    """Average daylight output per kWp for each month, campus median over inverters.
+    An average (not a sum) so that months with outages are not pulled down."""
+    d = df[df["irradiance_wm2"] >= 50].dropna(subset=["ac_power_w"])
+    monthly = specific_yield(d).groupby([d["inverter_id"], d["time"].dt.year, d["time"].dt.month]).mean()
+    monthly = monthly.groupby(level=[1, 2]).median().unstack(level=0)
+    monthly.columns.name = "year"
+    fig, ax = plt.subplots(figsize=(8, 3.8))
+    monthly.plot(ax=ax, marker="o")
+    ax.set(title="Average daylight output per kWp by month (campus median)", xlabel="Month",
+           ylabel="kW per kWp")
+    save_figure(fig, "eda_b2_seasonality")
+
+
+def class_distribution(table):
+    season = table["time"].dt.month.map(SEASONS)
+    shares = pd.crosstab(season, table["status_lead"], normalize="index") * 100
+    shares = shares.loc[["Winter", "Spring", "Summer", "Autumn"], ["Healthy", "Warning", "Faulty"]]
+    fig, ax = plt.subplots(figsize=(7, 3.8))
+    shares.plot.bar(stacked=True, ax=ax, color=["tab:green", "tab:orange", "tab:red"], rot=0)
+    ax.set(title="Class shares by season (status one hour ahead)", ylabel="% of rows", xlabel="")
+    save_figure(fig, "eda_b2_class_distribution")
+    return shares.round(1)
+
+
+def main():
+    df = pd.read_parquet(PROCESSED / "hkust_15min.parquet")
+    table = load()
+    print("A1"); power_vs_irradiance(df); sensor_change(df); night_threshold(df)
+    gap_heatmap(); missing_by_hour(df)
+    print("A2"); print(temperature_effect(table).round(3).to_string()); feature_correlation(table)
+    print("B1"); print(degradation(table).round(3).to_string()); underperformers(table)
+    print("B2"); seasonality(df); print(class_distribution(table).to_string())
+
+
+if __name__ == "__main__":
+    main()
