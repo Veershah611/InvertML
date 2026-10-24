@@ -6,6 +6,8 @@ Forecasts the health of 44 rooftop solar inverters on the HKUST campus one hour 
 |---|---|
 | [REPORT.md](REPORT.md) | **The report**: every stage, every result, limitations |
 | [VIVA.md](VIVA.md) | Short answers to likely viva questions |
+| [features_used.md](features_used.md) | The 20 features and how each model uses them |
+| [formulae.md](formulae.md) | Every formula in the code |
 | [Solar_Inverter_Health_Monitoring.md](Solar_Inverter_Health_Monitoring.md) | The original project plan and team split |
 
 ## Results at a glance
