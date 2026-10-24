@@ -1,0 +1,4 @@
+strategy,train_rows,macro_f1,faulty_recall,faulty_precision
+no balancing,260819,0.547,0.595,0.745
+balanced class weights,260819,0.574,0.724,0.471
+undersample Healthy (2 per other),116940,0.605,0.655,0.619

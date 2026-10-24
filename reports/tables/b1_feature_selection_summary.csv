@@ -1,5 +1,0 @@
-dropped_feature,kept_feature,correlation,threshold,reason
-specific_yield,hour_cos,0.917,0.85,High collinearity with hour_cos (|r| = 0.92 > 0.85)
-hour_cos,thermal_stress,0.965,0.85,High collinearity with thermal_stress (|r| = 0.96 > 0.85)
-temp_delta_stc,hour_cos,0.936,0.85,High collinearity with hour_cos (|r| = 0.94 > 0.85)
-performance_ratio,peer_dev_campus,0.997,0.85,High collinearity with peer_dev_campus (|r| = 1.00 > 0.85)

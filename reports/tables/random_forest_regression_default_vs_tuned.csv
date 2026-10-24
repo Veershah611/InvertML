@@ -1,0 +1,5 @@
+set,rows,rmse,mae,r2,version,tuned_settings
+val,182731,10.903,6.309,0.634,default,"{'model__max_depth': 10, 'model__min_samples_leaf': 5}"
+test,366110,10.765,6.127,0.543,default,"{'model__max_depth': 10, 'model__min_samples_leaf': 5}"
+val,182731,10.361,5.718,0.67,tuned,"{'model__max_depth': 10, 'model__min_samples_leaf': 5}"
+test,366110,10.445,5.407,0.57,tuned,"{'model__max_depth': 10, 'model__min_samples_leaf': 5}"

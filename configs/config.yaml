@@ -1,32 +1,23 @@
-# Single source of truth for paths, seeds, split dates and thresholds (§13.6).
+# One place for every path, date and threshold used by the code.
 
 paths:
   raw: data/raw
   processed: data/processed
 
 random_state: 42
-timezone: Asia/Hong_Kong
 
 # Stage 3: data preparation
-resample_freq: 15min
-min_daylight_coverage: 0.70
-daylight_irradiance_wm2: 50   # a bin counts as daylight for coverage if irradiance >= this
-# Irradiance sensor changes scale on this day (A1 EDA); prepare_data.py rescales
-# irradiance from here on and keeps the raw values in irradiance_raw_wm2.
-irradiance_sensor_change: "2023-02-14"
+daylight_irradiance_wm2: 50     # a 15-min bin counts as daylight from 50 W/m2 (EDA: 99 % of bins produce power)
+min_daylight_coverage: 0.70     # drop an inverter with less than 70 % of its daylight bins present
+irradiance_sensor_change: "2023-02-14"   # irradiance is rescaled from this day (EDA)
 
-# Stage 4: A2 cleaning. B1 labels remain undefined below 100 W/m².
-preprocessing:
-  daylight_irradiance_wm2: 50
-
-# Stage 11: chronological split
+# Stage 11: chronological split (train <= train_end < val <= val_end < test)
 split:
   train_end: "2022-06-30"
   val_end: "2022-12-31"
-  test_start: "2023-01-01"
   test_end: "2023-12-31"
 
-# Stage 11: unseen-station holdout (the 6 inverters that start only in 2023)
+# Stage 11: unseen-inverter test (the six inverters that only start in 2023)
 unseen_stations:
   - sq_block_p_inverter
   - shaw_auditorium_inverter
@@ -34,5 +25,3 @@ unseen_stations:
   - ug_hall9_inverter
   - zone_a2_inverter_2
   - zone_a2_inverter_3
-
-

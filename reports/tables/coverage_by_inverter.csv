@@ -1,45 +1,45 @@
-inverter_id,daylight_bins,missing_bins,first_time,coverage,kept
-sq_block_p_inverter,7029,802,2023-06-22 07:00:00,0.8859,True
-zone_j2_inverter,27609,2379,2021-12-08 06:00:00,0.9138,True
-lsk_south_inverter,35541,2939,2021-05-01 06:00:00,0.9173,True
-zone_j1_inverter,24935,1802,2022-03-02 06:00:00,0.9277,True
-zone_a7_inverter,29648,2041,2021-10-09 06:00:00,0.9312,True
-ug_hall8_inverter,13149,896,2023-01-05 07:00:00,0.9319,True
-shaw_auditorium_inverter,6258,381,2023-07-09 07:00:00,0.9391,True
-s_h_ho_sports_hall_inverter_2,28877,1368,2021-11-01 06:00:00,0.9526,True
-s_h_ho_sports_hall_inverter_1,28877,1368,2021-11-01 06:00:00,0.9526,True
-indoor_sports_centre_inverter,28313,1342,2021-11-17 07:00:00,0.9526,True
-ug_hall2_rf_inverter,34471,1611,2021-06-09 06:00:00,0.9533,True
-ug_hall2_2f_inverter,34733,1556,2021-06-03 07:00:00,0.9552,True
-library_inverter_1,21613,897,2022-06-01 06:00:00,0.9585,True
-library_inverter_3,21613,888,2022-06-01 06:00:00,0.9589,True
-library_inverter_2,21613,888,2022-06-01 06:00:00,0.9589,True
-ug_hall9_inverter,11878,459,2023-02-11 07:00:00,0.9614,True
-ug_hall3_inverter,35279,1278,2021-05-21 06:00:00,0.9638,True
-zone_a4_inverter,34386,1230,2021-06-11 07:00:00,0.9642,True
-ug_hall4_inverter,35277,1264,2021-05-21 07:00:00,0.9642,True
-sq1_inverter,35541,1261,2021-05-07 07:00:00,0.9645,True
-sq_block_r_inverter,29725,1031,2021-10-06 07:00:00,0.9653,True
-sq567_inverter,34780,1205,2021-06-02 06:00:00,0.9654,True
-zone_a5_inverter,29768,1025,2021-10-05 07:00:00,0.9656,True
-sq_apartment1_12_inverter,33307,1132,2021-07-08 06:00:00,0.966,True
-ug_hall6_inverter,35541,1204,2021-05-11 07:00:00,0.9661,True
-sq_block_s_inverter,29768,1002,2021-10-05 07:00:00,0.9663,True
-ug_hall7_inverter,35457,1195,2021-05-17 06:00:00,0.9663,True
-zone_l2_inverter,19045,639,2022-08-02 06:00:00,0.9664,True
-sq3_inverter,35365,1156,2021-05-19 07:00:00,0.9673,True
-zone_a1_inverter,34386,1110,2021-06-11 07:00:00,0.9677,True
-lsk_north_inverter,35541,1143,2021-05-04 07:00:00,0.9678,True
-sq_apartment37_48_inverter,33176,1049,2021-07-11 07:00:00,0.9684,True
-sq_apartment13_24_inverter,33176,1047,2021-07-11 07:00:00,0.9684,True
-sq_apartment25_36_inverter,33007,1031,2021-07-15 07:00:00,0.9688,True
-sq2_inverter,35541,1098,2021-05-12 07:00:00,0.9691,True
-sq4_inverter,35541,1095,2021-05-12 07:00:00,0.9692,True
-zone_a6_inverter,29503,904,2021-10-14 07:00:00,0.9694,True
-zone_a2_inverter_1,33620,468,2021-07-01 06:00:00,0.9861,True
-zone_d_inverter_2,26213,331,2022-01-19 15:00:00,0.9874,True
-zone_a2_inverter_2,8547,48,2023-05-16 11:30:00,0.9944,True
-zone_a2_inverter_3,8547,35,2023-05-16 11:30:00,0.9959,True
-zone_d_inverter_1,14261,29,2022-12-03 10:45:00,0.998,True
-wong_check_she_research_centre_inverter_2,27848,13,2021-12-01 06:00:00,0.9995,True
-wong_check_she_research_centre_inverter_1,27848,11,2021-12-01 06:00:00,0.9996,True
+inverter_id,coverage,kept
+sq_block_p_inverter,0.8859,True
+zone_j2_inverter,0.9138,True
+lsk_south_inverter,0.9173,True
+zone_j1_inverter,0.9277,True
+zone_a7_inverter,0.9312,True
+ug_hall8_inverter,0.9319,True
+shaw_auditorium_inverter,0.9391,True
+indoor_sports_centre_inverter,0.9526,True
+s_h_ho_sports_hall_inverter_2,0.9526,True
+s_h_ho_sports_hall_inverter_1,0.9526,True
+ug_hall2_rf_inverter,0.9533,True
+ug_hall2_2f_inverter,0.9552,True
+library_inverter_1,0.9585,True
+library_inverter_3,0.9589,True
+library_inverter_2,0.9589,True
+ug_hall9_inverter,0.9614,True
+ug_hall3_inverter,0.9638,True
+ug_hall4_inverter,0.9642,True
+zone_a4_inverter,0.9642,True
+sq1_inverter,0.9645,True
+sq_block_r_inverter,0.9653,True
+sq567_inverter,0.9654,True
+zone_a5_inverter,0.9656,True
+sq_apartment1_12_inverter,0.966,True
+ug_hall6_inverter,0.9661,True
+ug_hall7_inverter,0.9663,True
+sq_block_s_inverter,0.9663,True
+zone_l2_inverter,0.9664,True
+sq3_inverter,0.9673,True
+zone_a1_inverter,0.9677,True
+lsk_north_inverter,0.9678,True
+sq_apartment37_48_inverter,0.9684,True
+sq_apartment13_24_inverter,0.9684,True
+sq_apartment25_36_inverter,0.9688,True
+sq2_inverter,0.9691,True
+sq4_inverter,0.9692,True
+zone_a6_inverter,0.9694,True
+zone_a2_inverter_1,0.9861,True
+zone_d_inverter_2,0.9874,True
+zone_a2_inverter_2,0.9944,True
+zone_a2_inverter_3,0.9959,True
+zone_d_inverter_1,0.998,True
+wong_check_she_research_centre_inverter_2,0.9995,True
+wong_check_she_research_centre_inverter_1,0.9996,True

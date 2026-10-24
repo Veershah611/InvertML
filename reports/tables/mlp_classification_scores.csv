@@ -1,0 +1,7 @@
+set,rows,macro_f1,faulty_recall,faulty_precision
+train,260819,0.605,0.677,0.509
+val,182731,0.608,0.681,0.525
+test,366110,0.56,0.593,0.486
+test_before_14feb,34891,0.651,0.735,0.637
+test_after_14feb,331219,0.55,0.576,0.469
+unseen,37060,0.424,0.317,0.186

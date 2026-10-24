@@ -1,0 +1,8 @@
+model,val,test,test_before_14feb,test_after_14feb,unseen
+Random Forest,0.672,0.627,0.713,0.617,0.489
+XGBoost,0.623,0.58,0.682,0.569,0.433
+MLP,0.608,0.56,0.651,0.55,0.424
+Health rule,0.595,0.592,0.667,0.584,0.473
+Peer rule,0.582,0.542,0.609,0.534,0.459
+Logistic Regression,0.574,0.572,0.664,0.562,0.454
+Majority class,0.295,0.302,0.301,0.302,0.323

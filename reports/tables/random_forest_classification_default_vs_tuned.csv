@@ -1,0 +1,5 @@
+set,rows,macro_f1,faulty_recall,faulty_precision,version,tuned_settings
+val,182731,0.658,0.602,0.786,default,"{'model__max_depth': 20, 'model__min_samples_leaf': 5}"
+test,366110,0.623,0.522,0.715,default,"{'model__max_depth': 20, 'model__min_samples_leaf': 5}"
+val,182731,0.672,0.65,0.711,tuned,"{'model__max_depth': 20, 'model__min_samples_leaf': 5}"
+test,366110,0.627,0.579,0.652,tuned,"{'model__max_depth': 20, 'model__min_samples_leaf': 5}"

@@ -1,3 +1,0 @@
-configuration,val_rmse,test_rmse,unseen_rmse
-"Default (64, 32)",13.766,12.044,15.486
-Tuned (Best Params),13.955,11.857,11.676

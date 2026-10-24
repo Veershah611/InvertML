@@ -1,5 +1,0 @@
-model,version,params,val_rmse,test_rmse,val_macro_f1,val_faulty_recall,test_macro_f1,test_faulty_recall
-Ridge,default,1.0,11.949,11.293,,,,
-Ridge,tuned,0.01,11.949,11.293,,,,
-Logistic Regression,default,1.0,,,0.5439,0.7213,0.5272,0.6963
-Logistic Regression,tuned,10,,,0.5439,0.7213,0.5272,0.6963
