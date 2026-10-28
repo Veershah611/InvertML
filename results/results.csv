@@ -71,5 +71,5 @@ B2,MLP,classification,test,366110,,,,0.56,0.593,0.486,,,,,,,,
 B2,MLP,classification,test_before_14feb,34891,,,,0.651,0.735,0.637,,,,,,,,
 B2,MLP,classification,test_after_14feb,331219,,,,0.55,0.576,0.469,,,,,,,,
 B2,MLP,classification,unseen,37060,,,,0.424,0.317,0.186,,,,,,,,
-B1/B2,Isolation Forest (GPVS real faults),anomaly,test,933,,,,,,,,,,0.39,0.0,1.0,0.561,847.0
 A1/A2,Isolation Forest (HKUST injected),anomaly,test,366104,,,,,,,306.0,0.01,100.0,0.768,0.011,0.056,0.105,
+B1/B2,Isolation Forest (GPVS real faults),anomaly,test,933,,,,,,,,,,0.39,0.0,1.0,0.561,847.0
